@@ -1,4 +1,4 @@
-# 台本转字幕工具 (Script to Subtitles)
+# 台本转字幕工具 (Script Director)
 
 本工具利用 **Faster Whisper** 自动语音识别（ASR）和文本对齐技术，将给定的台本（文本文件）与音频文件对齐，生成带时间戳的字幕文件。支持输出 **SRT** 或 **LRC** 格式，自动根据输出文件后缀名判断。
 
