@@ -77,25 +77,90 @@ def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10):
 def map_timestamps(alignment, script_sents, whisper_segments):
     """
     根据对齐路径，为每个匹配的台本句子分配时间戳。
+    对于未匹配的台本句子，根据前后已匹配句子的时间进行线性插值。
     返回列表，每个元素为 (句子文本, 开始时间, 结束时间)
     """
-    mapped = []
-    i = 0
-    while i < len(alignment):
-        script_idx, whisper_idx = alignment[i]
+    # 1.建立 script_idx -> 对应的 whisper_idx 列表（仅当有匹配时）
+    script_to_whisper = {}
+    for script_idx, whisper_idx in alignment:
         if script_idx is not None and whisper_idx is not None:
-            # 匹配上的台本句子
-            sent = script_sents[script_idx]
-            start_time = whisper_segments[whisper_idx].start
-            end_time = whisper_segments[whisper_idx].end
-            # 向后看是否还有连续的 whisper 句子属于同一个 script 句子
-            while i + 1 < len(alignment) and alignment[i+1][0] == script_idx + 1 and alignment[i+1][1] is not None:
-                i += 1
-                end_time = whisper_segments[alignment[i][1]].end
-            mapped.append((sent, start_time, end_time))
-        # 忽略没有匹配上的句子（插入或删除）
-        i += 1
-    return mapped
+            if script_idx not in script_to_whisper:
+                script_to_whisper[script_idx] = []
+            script_to_whisper[script_idx].append(whisper_idx)
+
+    # 2.处理所有有匹配的句子，合并连续 whisper 索引
+    matched_indices = sorted(script_to_whisper.keys())
+    time_map = {} # script_idx -> (start, end)
+    for script_idx in matched_indices:
+        whisper_idxs = script_to_whisper[script_idx]
+        # whisper_idxs 是按顺序排列的（因为 alignment 是按时间顺序的）
+        start_time = whisper_segments[whisper_idxs[0]].start
+        end_time = whisper_segments[whisper_idxs[-1]].end
+        time_map[script_idx] = (start_time, end_time)
+
+    # 3.为所有台本句子生成最终列表（包括未匹配的，通过插值）
+    result = []
+    for script_idx in range(len(script_sents)):
+        text = script_sents[script_idx]
+        if script_idx in time_map:
+            # 直接匹配
+            start, end = time_map[script_idx]
+            result.append((text, start, end))
+        else:
+            # 未匹配，需要插值
+            # 找到前后最近的已匹配句子
+            prev_idx = None
+            next_idx = None
+            for i in range(script_idx - 1, -1, -1):
+                if i in time_map:
+                    prev_idx = i
+                    break
+            for i in range(script_idx + 1, len(script_sents)):
+                if i in time_map:
+                    next_idx = i
+                    break
+
+            if prev_idx is not None and next_idx is not None:
+                # 前后都有匹配，线性插值
+                prev_start, prev_end = time_map[prev_idx]
+                next_start, next_end = time_map[next_idx]
+                # 计算从 prev_end 到 next_start 的时间区间
+                total_gap = next_start - prev_end
+                # 计算需要插值的句子数量（包括当前）
+                gap_sentences = next_idx - prev_idx - 1  # 中间缺失的句子数
+                if gap_sentences > 0:
+                    # 每个缺失句子分配的时间段长度
+                    seg_duration = total_gap / (gap_sentences + 1)
+                    # 当前句子是第几个缺失（从1开始）
+                    offset = script_idx - prev_idx
+                    start = prev_end + seg_duration * offset
+                    end = start + seg_duration
+                else:
+                    # 理论上不会发生，但以防万一
+                    start = prev_end
+                    end = next_start
+            elif prev_idx is not None:
+                # 只有前一句
+                prev_start, prev_end = time_map[prev_idx]
+                # 使用前一句的时长作为参考
+                duration = prev_end - prev_start
+                start = prev_end
+                end = start + duration
+            elif next_idx is not None:
+                # 只有后一句
+                next_start, next_end = time_map[next_idx]
+                duration = next_end - next_start
+                end = next_start
+                start = end - duration
+            else:
+                # 没有任何匹配句子（极端情况），使用默认时间
+                start = 0.0
+                end = 5.0
+
+            result.append((text, start, end))
+
+    # 按 script_idx 顺序 result 已经天然有序，无需再排序
+    return result
 
 def main(audio_path, script_path, output_path, local_model_path, language='ja', device='cuda', compute_type='float16'):
     # 1. 加载 Whisper 模型
