@@ -146,7 +146,6 @@ def map_timestamps(alignment, script_sents, whisper_segments):
             result.append((text, start, end))
             logger.debug(f"已匹配句子 {script_idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
         else:
-            logger.info(f"句子 {script_idx} 未直接匹配，进行插值")
             # 找到前后最近的已匹配句子
             prev_idx = None
             next_idx = None
@@ -232,3 +231,14 @@ def main(audio_path, script_path, output_path, local_model_path, language='ja', 
         save_srt(subtitles, output_path)
 
     logger.info("处理完成")
+
+if __name__ == "__main__":
+    main(
+        audio_path='./audio.wav',
+        script_path='./script.txt',
+        output_path='./output.lrc',
+        local_model_path='./faster-whisper-large-v3-turbo',
+        language='ja',
+        device='cuda',
+        compute_type='float16'
+    )
