@@ -53,7 +53,7 @@ if __name__ == "__main__":
 
 ### 3. 运行脚本
 ```bash
-python your_script_name.py
+python main.py
 ```
 
 ---

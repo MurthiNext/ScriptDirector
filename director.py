@@ -1,7 +1,32 @@
 import os
+import logging
 import pysbd
 from faster_whisper import WhisperModel
 from rapidfuzz import fuzz
+
+# 配置日志：只写入文件，不输出到控制台
+def setup_logger():
+    logger = logging.getLogger('director')
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        # 文件处理器
+        fh = logging.FileHandler('log.log', encoding='utf-8')
+        fh.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+    return logger
+
+def exception_handler(func):
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+            return result
+        except Exception as e:
+            logger.error(e)
+    return wrapper
+
+logger = setup_logger()
 
 def format_time_srt(seconds):
     millis = int((seconds - int(seconds)) * 1000)
@@ -22,17 +47,24 @@ def save_srt(subtitles, output_path):
             f.write(f"{idx}\n")
             f.write(f"{format_time_srt(start)} --> {format_time_srt(end)}\n")
             f.write(f"{text}\n\n")
+    logger.info(f"已保存 SRT 字幕到 {output_path}")
 
 def save_lrc(subtitles, output_path):
     with open(output_path, 'w', encoding='utf-8') as f:
         for text, start, _ in subtitles:
             f.write(f"{format_time_lrc(start)} {text}\n")
+    logger.info(f"已保存 LRC 歌词到 {output_path}")
 
 def split_sentences_pysbd(text, language='ja'):
     segmenter = pysbd.Segmenter(language=language, clean=False)
     sentences = segmenter.segment(text)
-    return [s.strip() for s in sentences if s.strip()]
+    result = [s.strip() for s in sentences if s.strip()]
+    logger.info(f"台本分割为 {len(result)} 个句子")
+    for i, sent in enumerate(result, 1):
+        logger.debug(f"句子 {i}: {sent[:50]}..." if len(sent) > 50 else f"句子 {i}: {sent}")
+    return result
 
+@exception_handler
 def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10):
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
@@ -40,6 +72,8 @@ def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10):
     """
     n, m = len(script_sents), len(whisper_sents)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
+
+    logger.info(f"开始对齐：台本 {n} 句，Whisper {m} 句")
 
     # 初始化边界
     for i in range(1, n + 1):
@@ -50,7 +84,6 @@ def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10):
     # 填充 DP 表
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            # 相似度得分映射到 [-50, 50]
             sim_score = fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - 50
             match = dp[i-1][j-1] + sim_score
             delete = dp[i-1][j] + gap_penalty
@@ -63,24 +96,29 @@ def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10):
     while i > 0 or j > 0:
         if i > 0 and j > 0 and dp[i][j] == dp[i-1][j-1] + (fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - 50):
             alignment.append((i-1, j-1))
+            logger.debug(f"匹配: 台本 {i-1} <-> Whisper {j-1}")
             i -= 1
             j -= 1
         elif i > 0 and dp[i][j] == dp[i-1][j] + gap_penalty:
             alignment.append((i-1, None))
+            logger.debug(f"台本插入: {i-1}")
             i -= 1
         else:
             alignment.append((None, j-1))
+            logger.debug(f"Whisper 删除: {j-1}")
             j -= 1
     alignment.reverse()
+    logger.info(f"对齐完成，路径长度 {len(alignment)}")
     return alignment
 
+@exception_handler
 def map_timestamps(alignment, script_sents, whisper_segments):
     """
     根据对齐路径，为每个匹配的台本句子分配时间戳。
     对于未匹配的台本句子，根据前后已匹配句子的时间进行线性插值。
     返回列表，每个元素为 (句子文本, 开始时间, 结束时间)
     """
-    # 1.建立 script_idx -> 对应的 whisper_idx 列表（仅当有匹配时）
+    # 第一步：建立 script_idx -> 对应的 whisper_idx 列表（仅当有匹配时）
     script_to_whisper = {}
     for script_idx, whisper_idx in alignment:
         if script_idx is not None and whisper_idx is not None:
@@ -88,26 +126,27 @@ def map_timestamps(alignment, script_sents, whisper_segments):
                 script_to_whisper[script_idx] = []
             script_to_whisper[script_idx].append(whisper_idx)
 
-    # 2.处理所有有匹配的句子，合并连续 whisper 索引
+    # 第二步：处理所有有匹配的句子，合并连续 whisper 索引
     matched_indices = sorted(script_to_whisper.keys())
-    time_map = {} # script_idx -> (start, end)
+    logger.info(f"直接匹配的句子数: {len(matched_indices)}")
+    time_map = {}
     for script_idx in matched_indices:
         whisper_idxs = script_to_whisper[script_idx]
-        # whisper_idxs 是按顺序排列的（因为 alignment 是按时间顺序的）
         start_time = whisper_segments[whisper_idxs[0]].start
         end_time = whisper_segments[whisper_idxs[-1]].end
         time_map[script_idx] = (start_time, end_time)
+        logger.debug(f"句子 {script_idx} 时间: {start_time:.2f} -> {end_time:.2f}")
 
-    # 3.为所有台本句子生成最终列表（包括未匹配的，通过插值）
+    # 第三步：为所有台本句子生成最终列表（包括未匹配的，通过插值）
     result = []
     for script_idx in range(len(script_sents)):
         text = script_sents[script_idx]
         if script_idx in time_map:
-            # 直接匹配
             start, end = time_map[script_idx]
             result.append((text, start, end))
+            logger.debug(f"已匹配句子 {script_idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
         else:
-            # 未匹配，需要插值
+            logger.info(f"句子 {script_idx} 未直接匹配，进行插值")
             # 找到前后最近的已匹配句子
             prev_idx = None
             next_idx = None
@@ -121,93 +160,75 @@ def map_timestamps(alignment, script_sents, whisper_segments):
                     break
 
             if prev_idx is not None and next_idx is not None:
-                # 前后都有匹配，线性插值
                 prev_start, prev_end = time_map[prev_idx]
                 next_start, next_end = time_map[next_idx]
-                # 计算从 prev_end 到 next_start 的时间区间
                 total_gap = next_start - prev_end
-                # 计算需要插值的句子数量（包括当前）
-                gap_sentences = next_idx - prev_idx - 1  # 中间缺失的句子数
+                gap_sentences = next_idx - prev_idx - 1
                 if gap_sentences > 0:
-                    # 每个缺失句子分配的时间段长度
                     seg_duration = total_gap / (gap_sentences + 1)
-                    # 当前句子是第几个缺失（从1开始）
                     offset = script_idx - prev_idx
                     start = prev_end + seg_duration * offset
                     end = start + seg_duration
                 else:
-                    # 理论上不会发生，但以防万一
                     start = prev_end
                     end = next_start
             elif prev_idx is not None:
-                # 只有前一句
                 prev_start, prev_end = time_map[prev_idx]
-                # 使用前一句的时长作为参考
                 duration = prev_end - prev_start
                 start = prev_end
                 end = start + duration
             elif next_idx is not None:
-                # 只有后一句
                 next_start, next_end = time_map[next_idx]
                 duration = next_end - next_start
                 end = next_start
                 start = end - duration
             else:
-                # 没有任何匹配句子（极端情况），使用默认时间
                 start = 0.0
                 end = 5.0
+                logger.warning("无任何参考时间，使用默认值 0-5 秒")
 
             result.append((text, start, end))
+            logger.debug(f"插值句子 {script_idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
 
-    # 按 script_idx 顺序 result 已经天然有序，无需再排序
+    logger.info(f"最终生成 {len(result)} 条字幕")
     return result
 
+@exception_handler
 def main(audio_path, script_path, output_path, local_model_path, language='ja', device='cuda', compute_type='float16'):
     # 1. 加载 Whisper 模型
+    logger.info(f"加载模型: {local_model_path}")
     model = WhisperModel(local_model_path, device=device, compute_type=compute_type)
 
     # 2. 转录音频，获取带时间戳的片段
-    print("正在转录音频...")
+    logger.info("开始转录音频...")
     segments, info = model.transcribe(audio_path, language=language, word_timestamps=False)
     whisper_segments = list(segments)
-    print(f"Whisper 识别出 {len(whisper_segments)} 个片段")
+    logger.info(f"Whisper 识别出 {len(whisper_segments)} 个片段")
+    for idx, seg in enumerate(whisper_segments):
+        logger.debug(f"片段 {idx}: [{seg.start:.2f}-{seg.end:.2f}] {seg.text}")
 
     # 3. 读取台本
     with open(script_path, 'r', encoding='utf-8') as f:
         script_text = f.read().strip()
+    logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符")
 
     # 4. 使用 pysbd 分割台本句子
     script_sents = split_sentences_pysbd(script_text, language=language)
-    print(f"台本共分割为 {len(script_sents)} 个句子")
 
     # 5. 准备 Whisper 句子列表（直接使用每个片段的文本）
     whisper_sents = [seg.text for seg in whisper_segments]
 
     # 6. 对齐句子列表
-    print("正在对齐句子...")
     alignment = align_sentence_lists(script_sents, whisper_sents)
 
     # 7. 映射时间戳
     subtitles = map_timestamps(alignment, script_sents, whisper_segments)
-    print(f"成功对齐 {len(subtitles)} 条字幕")
 
     # 8. 根据输出文件后缀选择保存格式
     ext = os.path.splitext(output_path)[1].lower()
     if ext == '.lrc':
         save_lrc(subtitles, output_path)
-        print(f"LRC 歌词已保存至 {output_path}")
     else:
-        # 默认保存为 SRT
         save_srt(subtitles, output_path)
-        print(f"SRT 字幕已保存至 {output_path}")
 
-if __name__ == "__main__":
-    main(
-        audio_path="audio.wav",# 音频文件路径
-        script_path="script.txt",# 台本文件路径
-        output_path="output.lrc",# 输出文件路径（.srt 或 .lrc）
-        local_model_path="./faster-whisper-large-v3-turbo",# Faster Whisper 本地模型路径
-        language='ja',# 语言
-        device='cuda',# 计算设备
-        compute_type='float16'# 计算类型
-    )
+    logger.info("处理完成")
