@@ -234,11 +234,11 @@ def main(audio_path, script_path, output_path, local_model_path, language='ja', 
 
 if __name__ == "__main__":
     main(
-        audio_path='./audio.wav', # 音频文件
-        script_path='./script.txt', # 台本文件
-        output_path='./output.lrc', # 输出文件
-        local_model_path='./faster-whisper-large-v3-turbo', # 模型位置
-        language='ja', # 语言选择
-        device='cuda', # 设备 cuda/cpu
-        compute_type='float16' # 计算类型
+        audio_path="audio.wav",                # 音频文件路径
+        script_path="script.txt",               # 台本文件路径
+        output_path="output.lrc",                # 输出文件路径（.srt 或 .lrc）
+        local_model_path="./faster-whisper-large-v3-turbo",  # 本地模型文件夹路径
+        language='ja',                           # 语言代码
+        device='cuda',                           # 计算设备 'cuda' 或 'cpu'
+        compute_type='float16'                    # 计算类型
     )
