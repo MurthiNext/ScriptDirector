@@ -70,6 +70,7 @@ def split_sentences_pysbd(text, language='ja'):
         logger.debug(f"句子 {i}: {sent[:50]}..." if len(sent) > 50 else f"句子 {i}: {sent}")
     return result
 
+@exception_handler
 def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10): # 主干逻辑：对齐台本与听写结果
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
@@ -116,6 +117,7 @@ def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10): # 主干
     logger.info(f"对齐完成，路径长度 {len(alignment)}")
     return alignment
 
+@exception_handler
 def map_timestamps(alignment, script_sents, whisper_segments): # 主干逻辑：对齐时间轴
     """
     根据对齐路径，为每个匹配的台本句子分配时间戳。
@@ -196,6 +198,7 @@ def map_timestamps(alignment, script_sents, whisper_segments): # 主干逻辑：
     logger.info(f"最终生成 {len(result)} 条字幕")
     return result
 
+@exception_handler
 def direct_it(audio_path, script_path, output_path, local_model_path, language='ja', device='cuda', compute_type='float16'):
     """
     这个Faster Whisper不知道为啥一直造成程序的异常退出，byd找了半天才找到这个bug的根源。

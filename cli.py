@@ -26,6 +26,7 @@ def exception_handler(func): # 异常处理器
             print('报错:',e)
     return wrapper
 
+@exception_handler
 @click.command
 @click.option('-i', '--input', type=str, help='输入文件路径(音频与台本，使用英文逗号分隔)。')
 @click.option('-o', '--output', type=str, default='output.lrc', help='输出字幕路径(lrc或srt格式)。')
