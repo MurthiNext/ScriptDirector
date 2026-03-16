@@ -4,6 +4,10 @@ import pysbd
 from faster_whisper import WhisperModel
 from rapidfuzz import fuzz
 
+__author__ = 'MurthiNext'
+__version__ = '1.0.0 Rel'
+__date__ = '2026/03/16'
+
 def setup_logger(): # 配置日志
     if os.path.isfile('log.log'):
         os.remove('log.log')

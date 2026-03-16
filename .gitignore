@@ -1,4 +1,7 @@
 __pycache__
+.venv
+build
+dist
 faster-whisper-large-v3
 faster-whisper-large-v3-turbo
 audio.wav
@@ -6,3 +9,5 @@ config.ini
 log.log
 script.txt
 director_xxl.py
+cli.spec
+output.lrc
