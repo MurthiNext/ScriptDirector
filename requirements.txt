@@ -1,3 +1,4 @@
-faster_whisper==1.2.1
-pysbd==0.3.4
-rapidfuzz==3.14.3
+faster_whisper
+pysbd
+rapidfuzz
+click

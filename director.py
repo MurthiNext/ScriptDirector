@@ -4,20 +4,24 @@ import pysbd
 from faster_whisper import WhisperModel
 from rapidfuzz import fuzz
 
-# 配置日志
-def setup_logger():
+def setup_logger(): # 配置日志
+    if os.path.isfile('log.log'):
+        os.remove('log.log')
     logger = logging.getLogger('director')
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     if not logger.handlers:
-        # 文件处理器
-        fh = logging.FileHandler('log.log', encoding='utf-8')
-        fh.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        fh = logging.FileHandler('log.log', encoding='utf-8') # 文件处理器
+        ch = logging.StreamHandler() # 终端处理器
+        fh.setLevel(logging.DEBUG)
+        ch.setLevel(logging.INFO)
+        formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
         fh.setFormatter(formatter)
+        ch.setFormatter(formatter)
         logger.addHandler(fh)
+        logger.addHandler(ch)
     return logger
 
-def exception_handler(func):
+def exception_handler(func): # 异常处理器
     def wrapper(*args, **kwargs):
         try:
             result = func(*args, **kwargs)
@@ -26,7 +30,7 @@ def exception_handler(func):
             logger.error(e)
     return wrapper
 
-logger = setup_logger()
+logger = setup_logger() # 初始化日志
 
 def format_time_srt(seconds):
     millis = int((seconds - int(seconds)) * 1000)
@@ -47,12 +51,14 @@ def save_srt(subtitles, output_path):
             f.write(f"{idx}\n")
             f.write(f"{format_time_srt(start)} --> {format_time_srt(end)}\n")
             f.write(f"{text}\n\n")
+        f.close()
     logger.info(f"已保存 SRT 字幕到 {output_path}")
 
 def save_lrc(subtitles, output_path):
     with open(output_path, 'w', encoding='utf-8') as f:
         for text, start, _ in subtitles:
             f.write(f"{format_time_lrc(start)} {text}\n")
+        f.close()
     logger.info(f"已保存 LRC 歌词到 {output_path}")
 
 def split_sentences_pysbd(text, language='ja'):
@@ -64,8 +70,7 @@ def split_sentences_pysbd(text, language='ja'):
         logger.debug(f"句子 {i}: {sent[:50]}..." if len(sent) > 50 else f"句子 {i}: {sent}")
     return result
 
-@exception_handler
-def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10):
+def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10): # 主干逻辑：对齐台本与听写结果
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
     返回对齐路径列表，每个元素为 (script_idx, whisper_idx)，允许 None 表示插入/删除。
@@ -111,8 +116,7 @@ def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10):
     logger.info(f"对齐完成，路径长度 {len(alignment)}")
     return alignment
 
-@exception_handler
-def map_timestamps(alignment, script_sents, whisper_segments):
+def map_timestamps(alignment, script_sents, whisper_segments): # 主干逻辑：对齐时间轴
     """
     根据对齐路径，为每个匹配的台本句子分配时间戳。
     对于未匹配的台本句子，根据前后已匹配句子的时间进行线性插值。
@@ -192,8 +196,18 @@ def map_timestamps(alignment, script_sents, whisper_segments):
     logger.info(f"最终生成 {len(result)} 条字幕")
     return result
 
-@exception_handler
-def main(audio_path, script_path, output_path, local_model_path, language='ja', device='cuda', compute_type='float16'):
+def direct_it(audio_path, script_path, output_path, local_model_path, language='ja', device='cuda', compute_type='float16'):
+    """
+    这个Faster Whisper不知道为啥一直造成程序的异常退出，byd找了半天才找到这个bug的根源。
+    所以我得想个办法给它隔离出来，阻止它。
+    然而，目前这个问题仍然没有解决，使用Faster Whisper XXL还会出现更诡异的问题——它好似那个声波陷阱，在运行结束后攻击了我的耳膜。
+    而且那个玩意的cwd设置极其反直觉……
+    Fuck Damn，程序猿都是写史山的吗？这么多项目全是没修的bug。
+    或许我真应该借鉴一下VoiceTransl的写法，不过……再等等。
+
+    TODO (MurthiNext) 修复Faster Whisper库莫名其妙退出的问题。
+    """
+
     # 1. 加载 Whisper 模型
     logger.info(f"加载模型: {local_model_path}")
     model = WhisperModel(local_model_path, device=device, compute_type=compute_type)
@@ -201,10 +215,14 @@ def main(audio_path, script_path, output_path, local_model_path, language='ja', 
     # 2. 转录音频，获取带时间戳的片段
     logger.info("开始转录音频...")
     segments, info = model.transcribe(audio_path, language=language, word_timestamps=False)
-    whisper_segments = list(segments)
-    logger.info(f"Whisper 识别出 {len(whisper_segments)} 个片段")
-    for idx, seg in enumerate(whisper_segments):
-        logger.debug(f"片段 {idx}: [{seg.start:.2f}-{seg.end:.2f}] {seg.text}")
+
+    whisper_segments = []  # 用于存储所有片段，供后续对齐使用
+    for idx, seg in enumerate(segments):
+        whisper_segments.append(seg)
+        # 实时记录当前识别到的片段
+        logger.info(f"识别片段 {idx}\t{format_time_lrc(seg.start)}-{format_time_lrc(seg.end)} | {seg.text}")
+
+    logger.info(f"Faster Whisper 识别完成，共 {len(whisper_segments)} 个片段")
 
     # 3. 读取台本
     with open(script_path, 'r', encoding='utf-8') as f:
@@ -233,7 +251,7 @@ def main(audio_path, script_path, output_path, local_model_path, language='ja', 
     logger.info("处理完成")
 
 if __name__ == "__main__":
-    main(
+    direct_it(
         audio_path="audio.wav",                # 音频文件路径
         script_path="script.txt",               # 台本文件路径
         output_path="output.lrc",                # 输出文件路径（.srt 或 .lrc）

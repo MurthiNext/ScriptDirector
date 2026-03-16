@@ -1,128 +1,93 @@
-# 台本转字幕工具 (Script Director)
+# Script Director
 
-本工具利用 **Faster Whisper** 自动语音识别（ASR）和文本对齐技术，将给定的台本（文本文件）与音频文件对齐，生成带时间戳的字幕文件。支持输出 **SRT** 或 **LRC** 格式，自动根据输出文件后缀名判断。
+Script Director 是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕（SRT/LRC）的工具。它利用 **Faster Whisper** 进行语音识别，并通过动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
 
-- 本README由DeepSeek V3.2提供支持，写README什么的最讨厌了！
+## 特性
 
----
+- 🎙️ 基于 Faster Whisper 的高质量语音识别
+- 📄 支持日语（`ja`）、中文（`zh`）、英文（`en`）等多语言台本分割（使用 `pysbd`）
+- 🔗 智能句子对齐：采用 Needleman-Wunsch 风格算法，处理插入、删除和替换
+- ⏱️ 对未匹配的句子进行线性插值，确保字幕完整
+- 📝 输出格式自动识别：根据输出文件后缀生成 SRT 或 LRC
+- ⚙️ 命令行界面（CLI）和配置文件支持，方便重复使用
 
-## 功能特点
+## 安装
 
-- **多格式支持**：自动识别输出文件后缀 `.srt` 或 `.lrc`，生成对应的字幕/歌词文件。
-- **精确对齐**：使用动态规划（Needleman-Wunsch）算法将台本句子与 Whisper 识别的句子片段对齐，有效处理插入、删除和替换。
-- **日文优化**：默认支持日语（`language='ja'`），通过 `pysbd` 进行准确的句子边界检测。
-- **本地模型加载**：直接使用本地 CTranslate2 格式的 Faster Whisper 模型，无需在线下载。
-- **GPU加速**：支持 CUDA 加速（默认 `device='cuda'`），可快速处理长音频。
+### 依赖
+- Python 3.8+
+- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)（需预下载 CTranslate2 格式模型）
+- 其他 Python 包：`pysbd`, `rapidfuzz`, `click`
 
----
-
-## 安装依赖
-
-确保 Python 环境为 3.8 或更高版本，然后安装以下依赖：
-
-```bash
-pip install faster-whisper pysbd rapidfuzz
-```
-
-**可选**：如需 GPU 加速，请确保已安装 CUDA 和 cuDNN，并安装对应版本的 `faster-whisper`（通常会自动匹配）。
-
----
+### 安装步骤
+1. 克隆或下载本项目。
+2. 安装依赖：
+   ```bash
+   pip install faster-whisper pysbd rapidfuzz click
+   ```
+3. 下载 Faster Whisper 模型（例如 [faster-whisper-large-v3](https://huggingface.co/guillaumekln/faster-whisper-large-v3)）并解压到本地目录。
 
 ## 使用方法
 
-### 1. 准备文件
-- **音频文件**：支持常见格式如 `.wav`, `.mp3` 等。
-- **台本文件**：纯文本文件，包含音频中出现的全部文本，编码为 UTF-8。
-- **本地模型**：下载 CTranslate2 格式的 Faster Whisper 模型（例如 [faster-whisper-large-v3](https://huggingface.co/guillaumekln/faster-whisper-large-v3)），解压到本地文件夹。
+Script Director 提供命令行工具 `cli.py`，支持配置文件 `config.ini` 存储常用参数（模型路径、语言、设备等）。
 
-### 2. 修改脚本中的路径
-直接修改 `if __name__ == "__main__":` 部分中的参数，或通过函数参数传递。
-
-```python
-if __name__ == "__main__":
-    main(
-        audio_path="audio.wav",                # 音频文件路径
-        script_path="script.txt",               # 台本文件路径
-        output_path="output.lrc",                # 输出文件路径（.srt 或 .lrc）
-        local_model_path="./faster-whisper-large-v3-turbo",  # 本地模型文件夹路径
-        language='ja',                           # 语言代码（'ja'日语, 'zh'中文, 'en'英文等）
-        device='cuda',                           # 计算设备 'cuda' 或 'cpu'
-        compute_type='float16'                    # 计算类型（如 'float16', 'int8_float16'）
-    )
-```
-
-### 3. 运行脚本
+### 首次运行配置
+首次运行 `cli.py` 时，程序会引导你创建配置文件：
 ```bash
-python main.py
+python cli.py
 ```
+按照提示输入：
+- **Faster Whisper 本地模型路径**：模型文件夹的路径（如 `./faster-whisper-large-v3`）
+- **台本与音频所使用的语言代码**：例如 `ja`（日语）、`zh`（中文）、`en`（英文）
+- **设备类型**：`cuda` 或 `cpu`
+- **计算类型**：`float16`（GPU）、`int8`（CPU）等
 
----
+配置完成后会在当前目录生成 `config.ini`。
 
-## 参数说明
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `audio_path` | str | 必填 | 输入音频文件路径 |
-| `script_path` | str | 必填 | 台本文件路径（UTF-8编码） |
-| `output_path` | str | 必填 | 输出文件路径，后缀决定格式（`.srt` 或 `.lrc`） |
-| `local_model_path` | str | 必填 | 本地 CTranslate2 格式的 Whisper 模型文件夹 |
-| `language` | str | `'ja'` | 音频语言代码（ISO 639-1），如 `'ja'` 日语，`'zh'` 中文 |
-| `device` | str | `'cuda'` | 计算设备，可选 `'cuda'` 或 `'cpu'` |
-| `compute_type` | str | `'float16'` | 模型计算精度，常用值 `'float16'`（GPU）、`'int8_float16'`、`'int8'` |
-
----
-
-## 输出说明
-
-### SRT 格式（示例）
+### 基本命令
+```bash
+python cli.py -i "音频文件路径,台本文件路径" -o 输出文件路径
 ```
-1
-00:00:01,000 --> 00:00:04,500
-これは最初の文です。
+- `-i, --input`：音频文件和台本文件路径，用英文逗号分隔（例如 `audio.wav,script.txt`）
+- `-o, --output`：输出文件路径，扩展名决定格式：`.srt` 生成 SRT 字幕，`.lrc` 生成 LRC 歌词（默认 `output.lrc`）
 
-2
-00:00:05,200 --> 00:00:08,300
-これは二番目の文です。
+#### 示例
+```bash
+python cli.py -i "meeting.wav,transcript.txt" -o subtitles.srt
 ```
+程序将：
+1. 使用配置的模型对 `meeting.wav` 进行语音识别。
+2. 读取台本 `transcript.txt` 并分割为句子。
+3. 对齐识别结果与台本，生成时间戳。
+4. 保存为 SRT 字幕文件 `subtitles.srt`。
 
-### LRC 格式（示例）
+### 配置说明
+`config.ini` 文件内容示例：
+```ini
+[common]
+model = D:/models/faster-whisper-large-v3
+lang = ja
+device = cuda
+compute = float16
 ```
-[00:01.00] これは最初の文です。
-[00:05.20] これは二番目の文です。
-```
+- `model`：Faster Whisper 模型文件夹路径
+- `lang`：语言代码（支持 `ja`, `zh`, `en`, `ko`, `fr`, `de` 等）
+- `device`：计算设备 `cuda` 或 `cpu`
+- `compute`：计算精度，常用 `float16`（GPU）或 `int8`（CPU）
 
----
+如需修改配置，可直接编辑 `config.ini` 或删除后重新运行 `cli.py`。
+
+## 项目结构
+- `director.py`：核心模块，包含语音识别、句子对齐、时间戳映射、字幕保存等功能。
+- `cli.py`：命令行入口，处理参数、配置文件并调用 `director.direct_it`。
 
 ## 注意事项
-
-1. **语言支持**：`pysbd` 的句子分割功能依赖指定语言，确保 `language` 参数与音频及台本的语言一致。  
-2. **模型路径**：`local_model_path` 必须指向包含 `model.bin`、`config.json`、`tokenizer.json` 等文件的 CTranslate2 模型文件夹。  
-3. **音频时长**：Faster Whisper 会自动处理长音频，但内存占用与音频时长有关，建议在 GPU 上运行以加快速度。  
-4. **对齐效果**：如果台本与音频内容差异较大（如 Whisper 识别错误较多），可能需要调整 `gap_penalty` 或相似度计算方法。  
-5. **错误处理**：时间格式化函数已添加异常捕获，避免因无效时间戳导致程序崩溃。
-
----
-
-## 常见问题
-
-### Q: 输出时间戳为 `00:00:00,000` 或 `[00:00.00]`？
-A: 这通常表示从 Whisper 获取的时间戳无效（例如 None 或字符串）。请检查音频是否能正常转录，或更新 Faster Whisper 版本。
-
-### Q: 如何切换为英文或中文？
-A: 修改 `language` 参数为 `'en'`（英文）或 `'zh'`（中文），并确保 `pysbd` 支持该语言（中文需安装 `pysbd` 的额外语言包，或使用其他分割器）。
-
-### Q: 没有 GPU，如何使用 CPU 运行？
-A: 将 `device` 参数设为 `'cpu'`，`compute_type` 可设为 `'int8'` 以减少内存占用。
-
-### Q: 对齐后的字幕数量少于台本句子数？
-A: 某些句子可能因匹配分数过低被跳过。可调整 `align_sentence_lists` 中的 `gap_penalty` 或相似度阈值（硬编码在 DP 得分计算中）以提高容忍度。
-
----
+- 音频格式支持取决于 Faster Whisper（常见格式如 `wav`, `mp3`, `m4a` 等）。
+- 台本文件需为 UTF-8 编码的纯文本。
+- 如果 Whisper 识别结果与台本差异较大，可尝试调整 `align_sentence_lists` 中的 `gap_penalty` 参数（当前硬编码为 `-10`）。
 
 ## 许可证
-
-本项目使用MIT License。
+本项目采用 MIT 许可证。详情请参阅 [LICENSE](LICENSE) 文件。
 
 ---
 
-如果有任何问题或建议，欢迎提交 Issue 或改进代码！
+**Happy Subtitling!** 🎬

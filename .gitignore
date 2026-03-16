@@ -1,9 +1,8 @@
-faster-whisper-large-v3/
-faster-whisper-large-v3-turbo/
+__pycache__
+faster-whisper-large-v3
+faster-whisper-large-v3-turbo
 audio.wav
-output.lrc
-script.txt
-audio.srt
-__pycache__/
+config.ini
 log.log
-app.py
+script.txt
+director_xxl.py
