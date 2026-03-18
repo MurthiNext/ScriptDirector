@@ -1,6 +1,7 @@
-# Script Director
+<h1><p align='center' >Script Director</p></h1>
+<div align=center><img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector"/></div>
 
-Script Director 是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕（SRT/LRC）的工具。它利用 **Faster Whisper** 进行语音识别，并通过动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
+Script Director 是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕（SRT/LRC）的工具。它利用 **Faster Whisper** 进行语音识别，并通过 **Needleman-Wunsch** 风格的动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
 
 ## 特性
 
@@ -46,6 +47,10 @@ python cli.py
 
 ### 基本命令
 ```bash
+python cli.py --help
+```
+- `--help`：获取命令行帮助。
+```bash
 python cli.py -i "音频文件路径,台本文件路径" -o 输出文件路径
 ```
 - `-i, --input`：音频文件和台本文件路径，用英文逗号分隔（例如 `audio.wav,script.txt`）
@@ -80,6 +85,7 @@ compute = float16
 ## 项目结构
 - `director.py`：核心模块，包含语音识别、句子对齐、时间戳映射、字幕保存等功能。
 - `cli.py`：命令行入口，处理参数、配置文件并调用 `director.direct_it`。
+- `app.py`：图形化界面入口，正在开发中……
 
 ## 注意事项
 - 音频格式支持取决于 Faster Whisper（常见格式如 `wav`, `mp3`, `m4a` 等）。
