@@ -1,7 +1,6 @@
-<h1><p align='center' >Script Director BETA-DEV</p></h1>
+<h1><p align='center' >Script Director</p></h1>
 <div align=center><img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector"/></div>
 
-### &emsp;&emsp;这里是Script Director的抢先体验版！一般来讲，这个分支里存放着MurthiNext正在编写的内容，其中可能包含大量未经检验的代码，包括但不限于：从网上摘抄的内容、无法运行的代码、不存在的包或库，以及部分“脑袋一热”写出来的玩意，如果出现任何问题，请回到main分支！
 ### &emsp;&emsp;Script Director 是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕（SRT/LRC）的工具。它利用 **Faster Whisper** 进行语音识别，并通过 **Needleman-Wunsch** 风格的动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
 
 ## 特性
@@ -57,16 +56,7 @@ python cli.py config lang=en
 ```
 支持修改的键：`model`、`lang`、`device`、`compute`。
 
-#### 处理音频与台本
-使用 `process` 命令生成字幕：
-```bash
-python cli.py process "音频文件路径,台本文件路径" [-t srt|lrc] [-n 自定义名称]
-```
-- 参数 `INPUT_STR` 必须用英文逗号分隔两个文件路径，程序会自动识别音频文件和台本文件（台本文件扩展名需为 `.txt`，音频文件支持常见格式）。
-- `-t, --type`：输出格式，可选 `srt` 或 `lrc`，默认为 `srt`。
-- `-n, --name`：自定义输出文件名（不含扩展名），默认与音频文件同名。
-
-**示例**：
+### 基本命令
 ```bash
 python cli.py process "meeting.wav,transcript.txt" -t lrc -n meeting_lyrics
 ```
@@ -98,7 +88,6 @@ compute = float16
 ## 项目结构
 - `director.py`：核心模块，包含语音识别、句子对齐、时间戳映射、字幕保存等功能。
 - `cli.py`：命令行入口，处理参数、配置文件并调用 `director.direct_it`。
-- `app.py`：图形化界面入口，基于 PyQt6 实现。
 
 ## 注意事项
 - 音频格式支持取决于 Faster Whisper（常见格式如 `wav`, `mp3`, `m4a` 等）。
