@@ -1,4 +1,5 @@
-faster_whisper
 pysbd
+faster-whisper
 rapidfuzz
+PyQt6
 click

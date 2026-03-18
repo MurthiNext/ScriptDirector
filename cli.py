@@ -30,10 +30,13 @@ def exception_handler(func):
 @click.group(invoke_without_command=True)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
+    """
+    Script Director 命令行程序
+    """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
-@cli.command(name='help', help='显示命令帮助信息。若不指定命令名称，则显示全局帮助。')
+@cli.command(name='help', short_help='显示命令帮助信息。若不指定命令名称，则显示全局帮助。')
 @click.argument('command_name', required=False, type=str)
 def help_command(command_name: Optional[str] = None) -> None:
     """
@@ -49,11 +52,12 @@ def help_command(command_name: Optional[str] = None) -> None:
     else:
         click.echo(cli.get_help(click.Context(cli)))
 
-@cli.command(name='init', help='初始化配置文件（交互式）')
+@cli.command(name='init', short_help='初始化配置文件（交互式）')
 def init_config() -> None:
     """
     初始化配置文件 config.ini。
 
+    \b
     你需要依次输入以下配置项：
     - Faster Whisper 本地模型路径（例如：D:/models/whisper-medium）
     - 台本与音频所使用的语言代码（例如：zh, en, ja）
@@ -87,12 +91,13 @@ def init_config() -> None:
         conf.write(configfile)
     click.echo('配置文件已保存。')
 
-@cli.command(name='config', help='快速修改配置项，格式：key=value')
+@cli.command(name='config', short_help='快速修改配置项，格式：key=value')
 @click.argument('key_value', type=str)
 def modify_config(key_value: str) -> None:
     """
     直接通过命令行修改配置文件中的某项配置。
 
+    \b
     用法示例：
         python cli.py config model=/new/path/to/model
         python cli.py config lang=en
@@ -122,18 +127,20 @@ def modify_config(key_value: str) -> None:
     click.echo(f'已更新配置项 {key} = {value}')
 
 @exception_handler
-@cli.command(name='process', help='通过台本文件与音频文件生成字幕文件')
+@cli.command(name='process', short_help='通过台本文件与音频文件生成字幕文件')
 @click.argument('input_str', type=str)
-@click.option('-t', '--typing', type=click.Choice(['srt', 'lrc'], case_sensitive=False),
+@click.option('-t', '--type', type=click.Choice(['srt', 'lrc'], case_sensitive=False),
               default='srt', help='输出字幕格式，支持 srt 或 lrc，默认为 srt')
 @click.option('-n', '--name', type=str, default=None, help='指定输出文件的名称，该项不包含扩展名')
-def process_command(input_str: str, typing: str, name: str) -> None:
+def process_command(input_str: str, type: str, name: str) -> None:
     """
     处理音频和台本，生成字幕文件。
 
+    \b
     INPUT_STR 必须包含两个文件路径，用英文逗号分隔，例如：
         python cli.py process "audio.wav,script.txt"
 
+    \b
     程序会自动区分音频文件和台本文件：
     - 扩展名为 .txt 的视为台本文件
     - 其他扩展名或 MIME 类型为 audio/ 的视为音频文件
@@ -184,7 +191,7 @@ def process_command(input_str: str, typing: str, name: str) -> None:
         audio_basename = name
     else:
         audio_basename = os.path.splitext(os.path.basename(audio_path))[0]
-    output_filename = f"{audio_basename}.{typing}"
+    output_filename = f"{audio_basename}.{type}"
     output_path = os.path.join(audio_dir, output_filename)
 
     direct_it(

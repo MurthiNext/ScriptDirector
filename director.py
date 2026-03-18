@@ -7,29 +7,29 @@ import multiprocessing
 import traceback
 import time
 from typing import List, Tuple, Optional, Union, Any
+from logging.handlers import QueueHandler
+from multiprocessing import Queue as MPQueue
 
 __author__ = 'MurthiNext'
 __version__ = '1.0.5 Beta'
 __date__ = '2026/03/18'
 
-def setup_logger() -> logging.Logger: # 配置日志
-    if os.path.isfile('log.log'):
-        with open('log.log','w',encoding='utf-8') as wf:
-            wf.write('')
-            wf.close()
-    logger = logging.getLogger('director')
-    logger.setLevel(logging.DEBUG)
-    if not logger.handlers:
-        fh = logging.FileHandler('log.log', encoding='utf-8') # 文件处理器
-        ch = logging.StreamHandler() # 终端处理器
-        fh.setLevel(logging.DEBUG)
-        ch.setLevel(logging.INFO)
-        formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
-        fh.setFormatter(formatter)
-        ch.setFormatter(formatter)
-        logger.addHandler(fh)
-        logger.addHandler(ch)
-    return logger
+if os.path.isfile('log.log'):
+    with open('log.log','w',encoding='utf-8') as wf:
+        wf.write('')
+        wf.close()
+logger = logging.getLogger('director')
+logger.setLevel(logging.DEBUG)
+if not logger.handlers:
+    fh = logging.FileHandler('log.log', encoding='utf-8') # 文件处理器
+    ch = logging.StreamHandler() # 终端处理器
+    fh.setLevel(logging.DEBUG)
+    ch.setLevel(logging.INFO)
+    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+    logger.addHandler(fh)
+    logger.addHandler(ch)
 
 def exception_handler(func): # 异常处理器
     def wrapper(*args, **kwargs):
@@ -39,8 +39,6 @@ def exception_handler(func): # 异常处理器
         except Exception as e:
             logger.error(e)
     return wrapper
-
-logger = setup_logger() # 初始化日志
 
 def format_time_srt(seconds: float) -> str:
     millis = int((seconds - int(seconds)) * 1000)
@@ -208,11 +206,20 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
     logger.info(f"最终生成 {len(result)} 条字幕")
     return result
 
-def _run_whisper_task(audio_path: str, script_path: str, output_path: str, local_model_path: str, language: str, device: str, compute_type: str, result_queue: 'multiprocessing.Queue') -> None:
+def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
+                      local_model_path: str, language: str, device: str,
+                      compute_type: str, result_queue: MPQueue,
+                      log_queue: Optional[MPQueue] = None) -> None:
     """
     子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
+    如果提供了 log_queue，则将日志也发送到该队列。
     """
     try:
+        # 如果提供了日志队列，则添加 QueueHandler
+        if log_queue is not None:
+            queue_handler = QueueHandler(log_queue)
+            logger.addHandler(queue_handler)
+
         logger.info(f"加载模型: {local_model_path}")
         model = WhisperModel(local_model_path, device=device, compute_type=compute_type)
 
@@ -251,30 +258,32 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str, local
         # 确保子进程退出
         pass
 
-
 @exception_handler
-def direct_it(audio_path: str, script_path: str, output_path: str, local_model_path: str, language: str = 'ja', device: str = 'cuda', compute_type: str = 'float16') -> None:
+def direct_it(audio_path: str, script_path: str, output_path: str,
+              local_model_path: str, language: str = 'ja',
+              device: str = 'cuda', compute_type: str = 'float16',
+              log_queue: Optional[MPQueue] = None) -> None:
     """
-    多进程隔离Faster Whisper，直接给这玩意丢进子进程里，生死有命富贵在天，能拿到结果就是胜利。
+    多进程隔离Faster Whisper，直接给这玩意丢进子进程里。
+    新增 log_queue 参数，用于接收子进程的实时日志。
     """
     result_queue = multiprocessing.Queue()
     p = multiprocessing.Process(
         target=_run_whisper_task,
-        args=(audio_path, script_path, output_path, local_model_path, language, device, compute_type, result_queue)
+        args=(audio_path, script_path, output_path, local_model_path,
+              language, device, compute_type, result_queue, log_queue)
     )
     p.start()
     logger.info("已启动子进程进行语音识别...")
 
     subtitles = None
     try:
-        # 优先从队列获取结果
         result = result_queue.get(timeout=3600)
         if isinstance(result, str):
             logger.error(f"子进程返回错误信息: {result}")
             raise RuntimeError(f"语音识别失败: {result}")
         subtitles = result
     except Exception as e:
-        # 获取结果失败，可能是子进程崩溃或超时
         if p.is_alive():
             logger.error("子进程可能卡死，正在终止...")
             p.terminate()
@@ -282,7 +291,7 @@ def direct_it(audio_path: str, script_path: str, output_path: str, local_model_p
         raise RuntimeError(f"获取结果失败: {e}")
 
     p.join(timeout=10)
-    if p.is_alive(): # 哦还活着
+    if p.is_alive():
         logger.warning("子进程未及时退出，强制终止")
         p.terminate()
         p.join()
