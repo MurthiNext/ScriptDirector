@@ -12,6 +12,7 @@
 - ⏱️ 对未匹配的句子进行线性插值，确保字幕完整
 - 📝 输出格式自动识别：根据输出文件后缀生成 SRT 或 LRC
 - ⚙️ 命令行界面（CLI）和配置文件支持，方便重复使用
+- 🖥️ 图形化界面（GUI）支持（基于 PyQt6），提供更友好的操作体验
 - 🤖 这篇README也是由DeepSeek V3.2写的，拜托，正经人谁会写文档嘛
 
 ## 安装
@@ -19,24 +20,28 @@
 ### 依赖
 - Python 3.8+
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)（需预下载 CTranslate2 格式模型）
-- 其他 Python 包：`pysbd`, `rapidfuzz`, `click`
+- 其他 Python 包：`pysbd`, `rapidfuzz`, `click`, `PyQt6`（GUI 可选）
 
 ### 安装步骤
 1. 克隆或下载本项目。
-2. 安装依赖：
+2. 安装依赖（若不需要 GUI，可省略 `PyQt6`）：
    ```bash
-   pip install faster-whisper pysbd rapidfuzz click
+   pip install faster-whisper pysbd rapidfuzz click PyQt6
    ```
 3. 下载 Faster Whisper 模型（例如 [faster-whisper-large-v3](https://huggingface.co/guillaumekln/faster-whisper-large-v3)）并解压到本地目录。
 
 ## 使用方法
 
-Script Director 提供命令行工具 `cli.py`，支持配置文件 `config.ini` 存储常用参数（模型路径、语言、设备等）。
+Script Director 提供两种使用方式：**命令行工具** `cli.py` 和 **图形界面** `app.py`。
 
-### 首次运行配置
-首次运行 `cli.py` 时，程序会引导你创建配置文件：
+### 1. 命令行工具（CLI）
+
+CLI 支持子命令，便于配置和处理。
+
+#### 首次运行配置
+首次使用需通过 `init` 命令创建配置文件 `config.ini`：
 ```bash
-python cli.py
+python cli.py init
 ```
 按照提示输入：
 - **Faster Whisper 本地模型路径**：模型文件夹的路径（如 `./faster-whisper-large-v3`）
@@ -44,30 +49,39 @@ python cli.py
 - **设备类型**：`cuda` 或 `cpu`
 - **计算类型**：`float16`（GPU）、`int8`（CPU）等
 
-配置完成后会在当前目录生成 `config.ini`。
-
-### 基本命令
+#### 修改配置
+如需修改配置项，可使用 `config` 命令：
 ```bash
-python cli.py --help
+python cli.py config model=/new/model/path
+python cli.py config lang=en
 ```
-- `--help`：获取命令行帮助。
-```bash
-python cli.py -i "音频文件路径,台本文件路径" -o 输出文件路径
-```
-- `-i, --input`：音频文件和台本文件路径，用英文逗号分隔（例如 `audio.wav,script.txt`）
-- `-o, --output`：输出文件路径，扩展名决定格式：`.srt` 生成 SRT 字幕，`.lrc` 生成 LRC 歌词（默认 `output.lrc`）
+支持修改的键：`model`、`lang`、`device`、`compute`。
 
-#### 示例
+#### 处理音频与台本
+使用 `process` 命令生成字幕：
 ```bash
-python cli.py -i "meeting.wav,transcript.txt" -o subtitles.srt
+python cli.py process "音频文件路径,台本文件路径" [-t srt|lrc] [-n 自定义名称]
 ```
-程序将：
-1. 使用配置的模型对 `meeting.wav` 进行语音识别。
-2. 读取台本 `transcript.txt` 并分割为句子。
-3. 对齐识别结果与台本，生成时间戳。
-4. 保存为 SRT 字幕文件 `subtitles.srt`。
+- 参数 `INPUT_STR` 必须用英文逗号分隔两个文件路径，程序会自动识别音频文件和台本文件（台本文件扩展名需为 `.txt`，音频文件支持常见格式）。
+- `-t, --type`：输出格式，可选 `srt` 或 `lrc`，默认为 `srt`。
+- `-n, --name`：自定义输出文件名（不含扩展名），默认与音频文件同名。
 
-### 配置说明
+**示例**：
+```bash
+python cli.py process "meeting.wav,transcript.txt" -t lrc -n meeting_lyrics
+```
+输出文件将保存在音频文件所在目录，名为 `meeting_lyrics.lrc`。
+
+### 2. 图形界面（GUI）
+
+如果你更喜欢可视化操作，可以直接运行图形界面：
+```bash
+python app.py
+```
+在窗口中配置模型路径、语言、文件等，点击“运行”即可。日志会实时显示在界面中，方便查看进度。
+
+## 配置说明
+
 `config.ini` 文件内容示例：
 ```ini
 [common]
@@ -81,17 +95,16 @@ compute = float16
 - `device`：计算设备 `cuda` 或 `cpu`
 - `compute`：计算精度，常用 `float16`（GPU）或 `int8`（CPU）
 
-如需修改配置，可直接编辑 `config.ini` 或删除后重新运行 `cli.py`。
-
 ## 项目结构
 - `director.py`：核心模块，包含语音识别、句子对齐、时间戳映射、字幕保存等功能。
 - `cli.py`：命令行入口，处理参数、配置文件并调用 `director.direct_it`。
-- `app.py`：图形化界面入口，正在开发中……
+- `app.py`：图形化界面入口，基于 PyQt6 实现。
 
 ## 注意事项
 - 音频格式支持取决于 Faster Whisper（常见格式如 `wav`, `mp3`, `m4a` 等）。
 - 台本文件需为 UTF-8 编码的纯文本。
 - 如果 Whisper 识别结果与台本差异较大，可尝试调整 `align_sentence_lists` 中的 `gap_penalty` 参数（当前硬编码为 `-10`）。
+- 关闭 GUI 窗口时会强制终止所有子进程，确保程序完全退出。
 
 ## 许可证
 * 本项目采用 **MIT 许可证**。详情请参阅 [LICENSE](LICENSE) 文件。

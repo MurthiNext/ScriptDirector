@@ -11,7 +11,7 @@ from logging.handlers import QueueHandler
 from multiprocessing import Queue as MPQueue
 
 __author__ = 'MurthiNext'
-__version__ = '1.0.5 Beta'
+__version__ = '1.1.0 Rel-Dev'
 __date__ = '2026/03/18'
 
 if os.path.isfile('log.log'):
