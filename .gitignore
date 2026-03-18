@@ -9,5 +9,6 @@ config.ini
 log.log
 script.txt
 director_xxl.py
+processor.py
 cli.spec
 output.lrc

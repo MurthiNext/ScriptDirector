@@ -3,14 +3,20 @@ import logging
 import pysbd
 from faster_whisper import WhisperModel
 from rapidfuzz import fuzz
+import multiprocessing
+import traceback
+import time
+from typing import List, Tuple, Optional, Union, Any
 
 __author__ = 'MurthiNext'
-__version__ = '1.0.0 Rel'
-__date__ = '2026/03/16'
+__version__ = '1.0.5 Beta'
+__date__ = '2026/03/18'
 
-def setup_logger(): # 配置日志
+def setup_logger() -> logging.Logger: # 配置日志
     if os.path.isfile('log.log'):
-        os.remove('log.log')
+        with open('log.log','w',encoding='utf-8') as wf:
+            wf.write('')
+            wf.close()
     logger = logging.getLogger('director')
     logger.setLevel(logging.DEBUG)
     if not logger.handlers:
@@ -36,20 +42,20 @@ def exception_handler(func): # 异常处理器
 
 logger = setup_logger() # 初始化日志
 
-def format_time_srt(seconds):
+def format_time_srt(seconds: float) -> str:
     millis = int((seconds - int(seconds)) * 1000)
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
     return f"{h:02d}:{m:02d}:{s:02d},{millis:03d}"
 
-def format_time_lrc(seconds):
+def format_time_lrc(seconds: float) -> str:
     minutes = int(seconds // 60)
     secs = seconds % 60
     hundredths = int((secs - int(secs)) * 100)
     return f"[{minutes:02d}:{int(secs):02d}.{hundredths:02d}]"
 
-def save_srt(subtitles, output_path):
+def save_srt(subtitles: List[Tuple[str, float, float]], output_path: str) -> None:
     with open(output_path, 'w', encoding='utf-8') as f:
         for idx, (text, start, end) in enumerate(subtitles, 1):
             f.write(f"{idx}\n")
@@ -58,14 +64,14 @@ def save_srt(subtitles, output_path):
         f.close()
     logger.info(f"已保存 SRT 字幕到 {output_path}")
 
-def save_lrc(subtitles, output_path):
+def save_lrc(subtitles: List[Tuple[str, float, float]], output_path: str) -> None:
     with open(output_path, 'w', encoding='utf-8') as f:
         for text, start, _ in subtitles:
             f.write(f"{format_time_lrc(start)} {text}\n")
         f.close()
     logger.info(f"已保存 LRC 歌词到 {output_path}")
 
-def split_sentences_pysbd(text, language='ja'):
+def split_sentences_pysbd(text: str, language: str = 'ja') -> List[str]:
     segmenter = pysbd.Segmenter(language=language, clean=False)
     sentences = segmenter.segment(text)
     result = [s.strip() for s in sentences if s.strip()]
@@ -75,7 +81,7 @@ def split_sentences_pysbd(text, language='ja'):
     return result
 
 @exception_handler
-def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10): # 主干逻辑：对齐台本与听写结果
+def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_penalty: int = -10) -> List[Tuple[Optional[int], Optional[int]]]: # 主干逻辑：对齐台本与听写结果
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
     返回对齐路径列表，每个元素为 (script_idx, whisper_idx)，允许 None 表示插入/删除。
@@ -95,10 +101,10 @@ def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10): # 主干
     for i in range(1, n + 1):
         for j in range(1, m + 1):
             sim_score = fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - 50
-            match = dp[i-1][j-1] + sim_score
+            match_score = dp[i-1][j-1] + sim_score
             delete = dp[i-1][j] + gap_penalty
             insert = dp[i][j-1] + gap_penalty
-            dp[i][j] = max(match, delete, insert)
+            dp[i][j] = max(match_score, delete, insert)
 
     # 回溯
     alignment = []
@@ -122,7 +128,7 @@ def align_sentence_lists(script_sents, whisper_sents, gap_penalty=-10): # 主干
     return alignment
 
 @exception_handler
-def map_timestamps(alignment, script_sents, whisper_segments): # 主干逻辑：对齐时间轴
+def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_sents: List[str], whisper_segments: List[Any]) -> List[Tuple[str, float, float]]: # 主干逻辑：对齐时间轴
     """
     根据对齐路径，为每个匹配的台本句子分配时间戳。
     对于未匹配的台本句子，根据前后已匹配句子的时间进行线性插值。
@@ -202,60 +208,93 @@ def map_timestamps(alignment, script_sents, whisper_segments): # 主干逻辑：
     logger.info(f"最终生成 {len(result)} 条字幕")
     return result
 
+def _run_whisper_task(audio_path: str, script_path: str, output_path: str, local_model_path: str, language: str, device: str, compute_type: str, result_queue: 'multiprocessing.Queue') -> None:
+    """
+    子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
+    """
+    try:
+        logger.info(f"加载模型: {local_model_path}")
+        model = WhisperModel(local_model_path, device=device, compute_type=compute_type)
+
+        logger.info("开始转录音频...")
+        segments, info = model.transcribe(audio_path, language=language, word_timestamps=False)
+
+        whisper_segments = []
+        for idx, seg in enumerate(segments):
+            whisper_segments.append(seg)
+            logger.info(f"识别片段 {idx}\t{format_time_lrc(seg.start)}-{format_time_lrc(seg.end)} | {seg.text}")
+
+        logger.info(f"识别完成，共 {len(whisper_segments)} 个片段")
+
+        # 读取台本
+        with open(script_path, 'r', encoding='utf-8') as f:
+            script_text = f.read().strip()
+        logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符")
+
+        script_sents = split_sentences_pysbd(script_text, language=language)
+        whisper_sents = [seg.text for seg in whisper_segments]
+        alignment = align_sentence_lists(script_sents, whisper_sents)
+        subtitles = map_timestamps(alignment, script_sents, whisper_segments)
+
+        result_queue.put(subtitles)
+        # 确保数据被发送到管道
+        result_queue.close()
+        result_queue.join_thread()
+        # 缓冲时间
+        time.sleep(0.5)
+        logger.info("处理完成，结果已放回队列。")
+    except Exception as e:
+        error_msg = f"子进程发生错误：{str(e)}\n{traceback.format_exc()}"
+        result_queue.put(error_msg)
+        logger.error(error_msg)
+    finally:
+        # 确保子进程退出
+        pass
+
+
 @exception_handler
-def direct_it(audio_path, script_path, output_path, local_model_path, language='ja', device='cuda', compute_type='float16'):
+def direct_it(audio_path: str, script_path: str, output_path: str, local_model_path: str, language: str = 'ja', device: str = 'cuda', compute_type: str = 'float16') -> None:
     """
-    这个Faster Whisper不知道为啥一直造成程序的异常退出，byd找了半天才找到这个bug的根源。
-    所以我得想个办法给它隔离出来，阻止它。
-    然而，目前这个问题仍然没有解决，使用Faster Whisper XXL还会出现更诡异的问题——它好似那个声波陷阱，在运行结束后攻击了我的耳膜。
-    而且那个玩意的cwd设置极其反直觉……
-    Fuck Damn，程序猿都是写史山的吗？这么多项目全是没修的bug。
-    或许我真应该借鉴一下VoiceTransl的写法，不过……再等等。
-
-    TODO (MurthiNext) 修复Faster Whisper库莫名其妙退出的问题。
+    多进程隔离Faster Whisper，直接给这玩意丢进子进程里，生死有命富贵在天，能拿到结果就是胜利。
     """
+    result_queue = multiprocessing.Queue()
+    p = multiprocessing.Process(
+        target=_run_whisper_task,
+        args=(audio_path, script_path, output_path, local_model_path, language, device, compute_type, result_queue)
+    )
+    p.start()
+    logger.info("已启动子进程进行语音识别...")
 
-    # 1. 加载 Whisper 模型
-    logger.info(f"加载模型: {local_model_path}")
-    model = WhisperModel(local_model_path, device=device, compute_type=compute_type)
+    subtitles = None
+    try:
+        # 优先从队列获取结果
+        result = result_queue.get(timeout=3600)
+        if isinstance(result, str):
+            logger.error(f"子进程返回错误信息: {result}")
+            raise RuntimeError(f"语音识别失败: {result}")
+        subtitles = result
+    except Exception as e:
+        # 获取结果失败，可能是子进程崩溃或超时
+        if p.is_alive():
+            logger.error("子进程可能卡死，正在终止...")
+            p.terminate()
+            p.join()
+        raise RuntimeError(f"获取结果失败: {e}")
 
-    # 2. 转录音频，获取带时间戳的片段
-    logger.info("开始转录音频...")
-    segments, info = model.transcribe(audio_path, language=language, word_timestamps=False)
+    p.join(timeout=10)
+    if p.is_alive(): # 哦还活着
+        logger.warning("子进程未及时退出，强制终止")
+        p.terminate()
+        p.join()
 
-    whisper_segments = []  # 用于存储所有片段，供后续对齐使用
-    for idx, seg in enumerate(segments):
-        whisper_segments.append(seg)
-        # 实时记录当前识别到的片段
-        logger.info(f"识别片段 {idx}\t{format_time_lrc(seg.start)}-{format_time_lrc(seg.end)} | {seg.text}")
-
-    logger.info(f"Faster Whisper 识别完成，共 {len(whisper_segments)} 个片段")
-
-    # 3. 读取台本
-    with open(script_path, 'r', encoding='utf-8') as f:
-        script_text = f.read().strip()
-    logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符")
-
-    # 4. 使用 pysbd 分割台本句子
-    script_sents = split_sentences_pysbd(script_text, language=language)
-
-    # 5. 准备 Whisper 句子列表（直接使用每个片段的文本）
-    whisper_sents = [seg.text for seg in whisper_segments]
-
-    # 6. 对齐句子列表
-    alignment = align_sentence_lists(script_sents, whisper_sents)
-
-    # 7. 映射时间戳
-    subtitles = map_timestamps(alignment, script_sents, whisper_segments)
-
-    # 8. 根据输出文件后缀选择保存格式
+    # 保存字幕
     ext = os.path.splitext(output_path)[1].lower()
     if ext == '.lrc':
         save_lrc(subtitles, output_path)
     else:
         save_srt(subtitles, output_path)
 
-    logger.info("处理完成")
+    logger.info("字幕文件保存完成。")
 
 if __name__ == "__main__":
     direct_it(
