@@ -56,7 +56,16 @@ python cli.py config lang=en
 ```
 支持修改的键：`model`、`lang`、`device`、`compute`。
 
-### 基本命令
+#### 处理音频与台本
+使用 `process` 命令生成字幕：
+```bash
+python cli.py process "音频文件路径,台本文件路径" [-t srt|lrc] [-n 自定义名称]
+```
+- 参数 `INPUT_STR` 必须用英文逗号分隔两个文件路径，程序会自动识别音频文件和台本文件（台本文件扩展名需为 `.txt`，音频文件支持常见格式）。
+- `-t, --type`：输出格式，可选 `srt` 或 `lrc`，默认为 `srt`。
+- `-n, --name`：自定义输出文件名（不含扩展名），默认与音频文件同名。
+
+**示例**：
 ```bash
 python cli.py process "meeting.wav,transcript.txt" -t lrc -n meeting_lyrics
 ```
@@ -88,6 +97,7 @@ compute = float16
 ## 项目结构
 - `director.py`：核心模块，包含语音识别、句子对齐、时间戳映射、字幕保存等功能。
 - `cli.py`：命令行入口，处理参数、配置文件并调用 `director.direct_it`。
+- `app.py`：图形化界面入口，基于 PyQt6 实现。
 
 ## 注意事项
 - 音频格式支持取决于 Faster Whisper（常见格式如 `wav`, `mp3`, `m4a` 等）。
