@@ -12,8 +12,6 @@ from PyQt6.QtWidgets import (
     QMessageBox, QGroupBox, QFormLayout
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
-
-# 导入核心处理函数（修改后的 director）
 from director import direct_it
 
 logger = logging.getLogger('director')
@@ -36,7 +34,7 @@ class LogHandler(QObject, logging.Handler):
 
 class Worker(QObject):
     """在子线程中执行耗时任务的工作类"""
-    finished = pyqtSignal(object)  # 成功时传递 None，失败时传递异常字符串
+    finished = pyqtSignal(object)
 
     def __init__(self, audio_path, script_path, output_path,
                  model_path, language, device, compute_type):
@@ -64,7 +62,7 @@ class Worker(QObject):
                 compute_type=self.compute_type,
                 log_queue=self.log_queue
             )
-            self.finished.emit(None)  # 正常完成
+            self.finished.emit(None)
         except Exception as e:
             import traceback
             error_msg = f"处理失败: {str(e)}\n{traceback.format_exc()}"
@@ -75,7 +73,7 @@ class Worker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("字幕生成器 (Faster Whisper + 台本对齐)")
+        self.setWindowTitle("Script Director")
         self.setMinimumSize(800, 600)
 
         self.config_file = "config.ini"
@@ -185,7 +183,7 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self.log_text)
         main_layout.addWidget(log_group)
 
-    # ---------- 配置文件操作 ----------
+    # 配置文件操作
     def load_config(self):
         if os.path.exists(self.config_file):
             try:
@@ -229,7 +227,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存配置失败: {e}")
 
-    # ---------- 文件选择 ----------
+    # 文件选择
     def browse_audio(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择音频文件", "",
@@ -262,14 +260,14 @@ class MainWindow(QMainWindow):
             self.output_edit.setText(f"{base}.{ext}")
             self.output_edit.setModified(False)
 
-    # ---------- 日志显示 ----------
+    # 日志显示
     def append_log(self, message):
         self.log_text.append(message)
         cursor = self.log_text.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         self.log_text.setTextCursor(cursor)
 
-    # ---------- 读取子进程日志 ----------
+    # 读取子进程日志
     def read_logs(self):
         """从 worker.log_queue 中读取所有可用日志并显示"""
         if self.worker is None:
@@ -283,7 +281,7 @@ class MainWindow(QMainWindow):
         except multiprocessing.queues.Empty:
             pass
 
-    # ---------- 运行任务 ----------
+    # 运行任务
     def run_task(self):
         # 检查配置
         if not os.path.exists(self.config_file):
@@ -369,7 +367,7 @@ class MainWindow(QMainWindow):
         self.thread = None
         self.worker = None
 
-    # ---------- 窗口关闭事件 ----------
+    # 窗口关闭事件
     def closeEvent(self, event):
         """重写关闭事件，确保所有子进程立即终止"""
         os._exit(0)
