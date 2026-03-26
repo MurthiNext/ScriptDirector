@@ -21,13 +21,13 @@
 ### 依赖
 - Python 3.8+
 - [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)（需预下载 CTranslate2 格式模型）
-- 其他 Python 包：`pysbd`, `rapidfuzz`, `click`, `customtkinter`（GUI 必须）
+- 其他 Python 包：`shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
 
 ### 安装步骤
 1. 克隆或下载本项目。
 2. 安装依赖：
    ```bash
-   pip install faster-whisper pysbd rapidfuzz click customtkinter
+   pip install -r requirements.txt
    ```
 3. 下载 Faster Whisper 模型（例如 [faster-whisper-large-v3](https://huggingface.co/guillaumekln/faster-whisper-large-v3)）并解压到本地目录。
 
