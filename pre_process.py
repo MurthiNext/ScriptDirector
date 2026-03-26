@@ -2,8 +2,7 @@ import re
 from typing import List, Optional
 
 def remove_brackets(text: str) -> str:
-    # 删除所有 [...] 及其内容
-    return re.sub(r'\[[^\]]*\]', '', text)
+    return re.sub(r'\[[^\]]*\]|【[^】]*】', '', text)
 
 def remove_empty_lines(lines: List[str]) -> List[str]:
     return [line for line in lines if line.strip()]
@@ -13,7 +12,7 @@ def clean_script_text(text: str) -> str:
     对台本全文进行清洗：
     1. 按行分割
     2. 删除空行
-    3. 删除方括号内容
+    3. 删除方括号内容（支持英文 [] 和中文 【】）
     4. 删除仅含标点符号的行（可选，但保留标点）
     """
     lines = text.splitlines()
