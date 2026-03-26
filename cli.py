@@ -206,4 +206,6 @@ def process_command(input_str: str, type: str, name: str) -> None:
     click.echo(f'字幕已生成：{output_path}')
 
 if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
     cli()

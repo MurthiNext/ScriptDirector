@@ -8,10 +8,9 @@ import traceback
 import time
 from typing import List, Tuple, Optional, Union, Any
 from logging.handlers import QueueHandler
-from multiprocessing import Queue as MPQueue
 
 __author__ = 'MurthiNext'
-__version__ = '1.1.0 Rel-Dev'
+__version__ = '1.1.0 Rel'
 __date__ = '2026/03/18'
 
 if os.path.isfile('log.log'):
@@ -19,12 +18,10 @@ if os.path.isfile('log.log'):
         wf.write('')
         wf.close()
 logger = logging.getLogger('director')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 if not logger.handlers:
     fh = logging.FileHandler('log.log', encoding='utf-8') # 文件处理器
     ch = logging.StreamHandler() # 终端处理器
-    fh.setLevel(logging.DEBUG)
-    ch.setLevel(logging.INFO)
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
     fh.setFormatter(formatter)
     ch.setFormatter(formatter)
@@ -208,8 +205,8 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
 
 def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
                       local_model_path: str, language: str, device: str,
-                      compute_type: str, result_queue: MPQueue,
-                      log_queue: Optional[MPQueue] = None) -> None:
+                      compute_type: str, result_queue: multiprocessing.Queue,
+                      log_queue: Optional[multiprocessing.Queue] = None) -> None:
     """
     子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
     如果提供了 log_queue，则将日志也发送到该队列。
@@ -262,7 +259,7 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
 def direct_it(audio_path: str, script_path: str, output_path: str,
               local_model_path: str, language: str = 'ja',
               device: str = 'cuda', compute_type: str = 'float16',
-              log_queue: Optional[MPQueue] = None) -> None:
+              log_queue: Optional[multiprocessing.Queue] = None) -> None:
     """
     多进程隔离Faster Whisper，直接给这玩意丢进子进程里。
     新增 log_queue 参数，用于接收子进程的实时日志。

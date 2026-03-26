@@ -11,4 +11,5 @@ script.txt
 director_xxl.py
 processor.py
 cli.spec
+app.spec
 output.lrc
