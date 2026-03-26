@@ -88,56 +88,97 @@ class App(ctk.CTk):
         self.geometry("800x600")
         self.resizable(False, False)
 
+        # 外观设置
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
         self.is_processing = False
 
+        # 主框架
         self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        self.audio_label = ctk.CTkLabel(self.main_frame, text="音频文件：")
-        self.audio_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
-        self.audio_entry = ctk.CTkEntry(self.main_frame, width=400)
-        self.audio_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.audio_btn = ctk.CTkButton(self.main_frame, text="浏览", width=60, command=self.browse_audio)
-        self.audio_btn.grid(row=0, column=2, padx=5, pady=5)
+        # 配置网格列权重
+        self.main_frame.grid_columnconfigure(0, weight=0)  # 标签列
+        self.main_frame.grid_columnconfigure(1, weight=1)  # 输入框列
+        self.main_frame.grid_columnconfigure(2, weight=0)  # 按钮列
 
-        self.script_label = ctk.CTkLabel(self.main_frame, text="台本文件：")
-        self.script_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
-        self.script_entry = ctk.CTkEntry(self.main_frame, width=400)
-        self.script_entry.grid(row=1, column=1, padx=5, pady=5)
-        self.script_btn = ctk.CTkButton(self.main_frame, text="浏览", width=60, command=self.browse_script)
-        self.script_btn.grid(row=1, column=2, padx=5, pady=5)
+        # 行号计数器
+        row = 0
 
-        self.name_label = ctk.CTkLabel(self.main_frame, text="输出名称：")
-        self.name_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
-        self.name_entry = ctk.CTkEntry(self.main_frame, width=400)
-        self.name_entry.grid(row=2, column=1, padx=5, pady=5)
+        # 音频文件
+        self.audio_label = ctk.CTkLabel(self.main_frame, text="音频文件：", anchor="e", width=100)
+        self.audio_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.audio_entry = ctk.CTkEntry(self.main_frame)
+        self.audio_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
+        self.audio_btn = ctk.CTkButton(self.main_frame, text="浏览", width=80, command=self.browse_audio)
+        self.audio_btn.grid(row=row, column=2, padx=5, pady=5)
 
-        self.type_label = ctk.CTkLabel(self.main_frame, text="输出格式：")
-        self.type_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
-        self.type_menu = ctk.CTkOptionMenu(self.main_frame, values=["srt", "lrc"])
-        self.type_menu.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+        row += 1
 
+        # 台本文件
+        self.script_label = ctk.CTkLabel(self.main_frame, text="台本文件：", anchor="e", width=100)
+        self.script_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.script_entry = ctk.CTkEntry(self.main_frame)
+        self.script_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
+        self.script_btn = ctk.CTkButton(self.main_frame, text="浏览", width=80, command=self.browse_script)
+        self.script_btn.grid(row=row, column=2, padx=5, pady=5)
+
+        row += 1
+
+        # 输出名称
+        self.name_label = ctk.CTkLabel(self.main_frame, text="输出名称：", anchor="e", width=100)
+        self.name_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.name_entry = ctk.CTkEntry(self.main_frame)
+        self.name_entry.grid(row=row, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
+
+        row += 1
+
+        # 输出格式
+        self.type_label = ctk.CTkLabel(self.main_frame, text="输出格式：", anchor="e", width=100)
+        self.type_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.type_menu = ctk.CTkOptionMenu(self.main_frame, values=["srt", "lrc"], width=120)
+        self.type_menu.grid(row=row, column=1, padx=5, pady=5, sticky="w")
+        self.type_menu.set("srt")
+
+        row += 1
+
+        # 预处理选项（独立一行）
         self.preprocess_var = tk.BooleanVar()
-        self.preprocess_check = ctk.CTkCheckBox(self.main_frame, text="预处理台本（删除空行和方括号标识）",
-                                                variable=self.preprocess_var)
-        self.preprocess_check.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+        self.preprocess_check = ctk.CTkCheckBox(
+            self.main_frame,
+            text="预处理台本（删除空行和方括号标识）",
+            variable=self.preprocess_var
+        )
+        self.preprocess_check.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="w")
 
-        self.start_btn = ctk.CTkButton(self.main_frame, text="开始处理", command=self.start_processing)
-        self.start_btn.grid(row=5, column=0, columnspan=2, padx=5, pady=10)
+        row += 1
 
-        self.log_label = ctk.CTkLabel(self.main_frame, text="运行日志：")
-        self.log_label.grid(row=6, column=0, padx=5, pady=5, sticky="w")
-        self.log_text = ctk.CTkTextbox(self.main_frame, width=760, height=300)
-        self.log_text.grid(row=7, column=0, columnspan=3, padx=5, pady=5)
+        # 开始按钮（居中）
+        self.start_btn = ctk.CTkButton(self.main_frame, text="开始处理", width=150, height=35, command=self.start_processing)
+        self.start_btn.grid(row=row, column=0, columnspan=3, padx=5, pady=10)
 
+        row += 1
+
+        # 日志区域
+        self.log_label = ctk.CTkLabel(self.main_frame, text="运行日志：", anchor="w")
+        self.log_label.grid(row=row, column=0, columnspan=3, padx=5, pady=5, sticky="w")
+        row += 1
+
+        self.log_text = ctk.CTkTextbox(self.main_frame, height=280, wrap="word")
+        self.log_text.grid(row=row, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
+
+        # 使日志文本框可扩展
+        self.main_frame.grid_rowconfigure(row, weight=1)
+
+        # 启动后台线程
         self.thread = threading.Thread(target=processing_thread, args=(self,), daemon=True)
         self.thread.start()
 
+        # 定时检查队列
         self.after(100, self.check_queues)
 
+        # 绑定关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def browse_audio(self):
@@ -161,6 +202,7 @@ class App(ctk.CTk):
         if not audio or not script:
             self.append_log("错误：请填写音频文件和台本文件路径")
             return
+        # 清空日志
         self.log_text.delete("1.0", "end")
         self.is_processing = True
         status_queue.put(('start', audio, script, name, fmt, prep))
@@ -170,6 +212,7 @@ class App(ctk.CTk):
         self.log_text.see("end")
 
     def check_queues(self):
+        # 处理日志队列
         try:
             while True:
                 item = log_queue.get_nowait()
@@ -180,6 +223,7 @@ class App(ctk.CTk):
                 self.append_log(msg)
         except queue.Empty:
             pass
+        # 处理状态队列
         try:
             msg = status_queue.get_nowait()
             if msg[0] == 'success':
@@ -192,6 +236,7 @@ class App(ctk.CTk):
                 messagebox.showerror("错误", f"处理失败：{msg[1]}")
         except queue.Empty:
             pass
+        # 继续定时
         self.after(100, self.check_queues)
 
     def on_closing(self):
@@ -200,6 +245,7 @@ class App(ctk.CTk):
             if not result:
                 return
         os._exit(0)
+
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
