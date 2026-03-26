@@ -10,8 +10,8 @@ from typing import List, Tuple, Optional, Union, Any
 from logging.handlers import QueueHandler
 
 __author__ = 'MurthiNext'
-__version__ = '1.1.0 Rel'
-__date__ = '2026/03/18'
+__version__ = '1.1.5 Beta'
+__date__ = '2026/03/26'
 
 if os.path.isfile('log.log'):
     with open('log.log','w',encoding='utf-8') as wf:
@@ -206,7 +206,8 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
 def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
                       local_model_path: str, language: str, device: str,
                       compute_type: str, result_queue: multiprocessing.Queue,
-                      log_queue: Optional[multiprocessing.Queue] = None) -> None:
+                      log_queue: Optional[multiprocessing.Queue] = None,
+                      preprocess: bool = False) -> None:
     """
     子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
     如果提供了 log_queue，则将日志也发送到该队列。
@@ -233,6 +234,13 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
         # 读取台本
         with open(script_path, 'r', encoding='utf-8') as f:
             script_text = f.read().strip()
+
+        # 如果启用预处理，则清洗台本内容
+        if preprocess:
+            from pre_process import clean_script_text
+            script_text = clean_script_text(script_text)
+            logger.info("已对台本进行预处理（删除空行和方括号内容）")
+
         logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符")
 
         script_sents = split_sentences_pysbd(script_text, language=language)
@@ -259,16 +267,18 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
 def direct_it(audio_path: str, script_path: str, output_path: str,
               local_model_path: str, language: str = 'ja',
               device: str = 'cuda', compute_type: str = 'float16',
-              log_queue: Optional[multiprocessing.Queue] = None) -> None:
+              log_queue: Optional[multiprocessing.Queue] = None,
+              preprocess: bool = False) -> None:
     """
     多进程隔离Faster Whisper，直接给这玩意丢进子进程里。
     新增 log_queue 参数，用于接收子进程的实时日志。
+    新增 preprocess 参数，若为 True 则对台本进行清洗（删除空行、方括号内容等）。
     """
     result_queue = multiprocessing.Queue()
     p = multiprocessing.Process(
         target=_run_whisper_task,
         args=(audio_path, script_path, output_path, local_model_path,
-              language, device, compute_type, result_queue, log_queue)
+              language, device, compute_type, result_queue, log_queue, preprocess)
     )
     p.start()
     logger.info("已启动子进程进行语音识别...")

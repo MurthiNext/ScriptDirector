@@ -63,6 +63,7 @@ def init_config() -> None:
     - 台本与音频所使用的语言代码（例如：zh, en, ja）
     - 设备类型（cuda 或 cpu）
     - 计算类型（float16 或 int8）
+    ...
 
     如果配置文件已存在，会询问是否覆盖。
     """
@@ -132,7 +133,9 @@ def modify_config(key_value: str) -> None:
 @click.option('-t', '--type', type=click.Choice(['srt', 'lrc'], case_sensitive=False),
               default='srt', help='输出字幕格式，支持 srt 或 lrc，默认为 srt')
 @click.option('-n', '--name', type=str, default=None, help='指定输出文件的名称，该项不包含扩展名')
-def process_command(input_str: str, type: str, name: str) -> None:
+@click.option('-p', '--preprocess', is_flag=True, default=False,
+              help='预处理台本，删除空行和方括号内容（如角色标识）')
+def process_command(input_str: str, type: str, name: str, preprocess: bool) -> None:
     """
     处理音频和台本，生成字幕文件。
 
@@ -148,6 +151,12 @@ def process_command(input_str: str, type: str, name: str) -> None:
     生成的字幕文件与音频文件同名，扩展名为 .srt 或 .lrc，保存在同一目录。
 
     运行此命令前必须通过 init 命令创建配置文件 config.ini。
+
+    \b
+    如果指定 -p 或 --preprocess，则会对台本进行清洗：
+    - 删除空行
+    - 删除方括号内的内容（例如 [人名]、[动作说明]）
+    - 去除多余空格
     """
     files = [f.strip() for f in input_str.split(',')]
     if len(files) != 2:
@@ -201,7 +210,8 @@ def process_command(input_str: str, type: str, name: str) -> None:
         local_model_path=model,
         language=lang,
         device=device,
-        compute_type=compute
+        compute_type=compute,
+        preprocess=preprocess
     )
     click.echo(f'字幕已生成：{output_path}')
 
