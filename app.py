@@ -380,7 +380,6 @@ class MainWindow(QMainWindow):
 
     # 窗口关闭事件
     def closeEvent(self, event):
-        """重写关闭事件，确保所有子进程立即终止"""
         os._exit(0)
 
 
@@ -392,4 +391,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()
