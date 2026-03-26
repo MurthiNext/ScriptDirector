@@ -8,12 +8,12 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import logging
+import signal
+import psutil
 
 from director import direct_it
 
-# ---------- 配置读取 ----------
 def read_config():
-    """读取配置文件，返回 common 节的配置字典"""
     config = configparser.ConfigParser()
     config.read('config.ini', encoding='utf-8')
     if 'common' not in config:
@@ -58,13 +58,26 @@ def open_file_dialog(file_type, initialdir=''):
     root.destroy()
     return path
 
+def kill_process_tree(pid):
+    """递归终止进程及其所有子进程"""
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.terminate()
+        # 等待进程结束
+        gone, alive = psutil.wait_procs(children, timeout=3)
+        for p in alive:
+            p.kill()
+    except psutil.NoSuchProcess:
+        pass
+
 def processing_thread(app):
     while True:
         try:
             msg = status_queue.get(timeout=0.5)
             if msg[0] == 'start':
                 (_, audio, script, name, fmt, prep, model_path, language, device, compute_type) = msg
-                # 直接使用 GUI 传入的参数
                 try:
                     audio_dir = os.path.dirname(audio) or '.'
                     base = name if name else os.path.splitext(os.path.basename(audio))[0]
@@ -94,13 +107,12 @@ class App(ctk.CTk):
         self.geometry("800x700")
         self.resizable(False, False)
 
-        # 外观设置
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
         self.is_processing = False
 
-        # 读取配置文件默认值（如果存在）
+        # 读取配置文件默认值
         self.config_defaults = read_config()
 
         # 主框架
@@ -108,9 +120,9 @@ class App(ctk.CTk):
         self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # 配置网格列权重
-        self.main_frame.grid_columnconfigure(0, weight=0)  # 标签列
-        self.main_frame.grid_columnconfigure(1, weight=1)  # 输入框列
-        self.main_frame.grid_columnconfigure(2, weight=0)  # 按钮列
+        self.main_frame.grid_columnconfigure(0, weight=0)
+        self.main_frame.grid_columnconfigure(1, weight=1)
+        self.main_frame.grid_columnconfigure(2, weight=0)
 
         row = 0
 
@@ -217,11 +229,9 @@ class App(ctk.CTk):
 
         self.log_text = ctk.CTkTextbox(self.main_frame, height=280, wrap="word")
         self.log_text.grid(row=row, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
-
-        # 使日志文本框可扩展
         self.main_frame.grid_rowconfigure(row, weight=1)
 
-        # 如果存在配置文件，将默认值填充到控件
+        # 从配置文件填充默认值
         if self.config_defaults:
             if self.config_defaults.get('model'):
                 self.model_entry.insert(0, self.config_defaults['model'])
@@ -284,7 +294,6 @@ class App(ctk.CTk):
             self.append_log("错误：请选择语言代码")
             return
 
-        # 清空日志
         self.log_text.delete("1.0", "end")
         self.is_processing = True
         status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type))
@@ -294,7 +303,6 @@ class App(ctk.CTk):
         self.log_text.see("end")
 
     def check_queues(self):
-        # 处理日志队列
         try:
             while True:
                 item = log_queue.get_nowait()
@@ -305,7 +313,6 @@ class App(ctk.CTk):
                 self.append_log(msg)
         except queue.Empty:
             pass
-        # 处理状态队列
         try:
             msg = status_queue.get_nowait()
             if msg[0] == 'success':
@@ -318,7 +325,6 @@ class App(ctk.CTk):
                 messagebox.showerror("错误", f"处理失败：{msg[1]}")
         except queue.Empty:
             pass
-        # 继续定时
         self.after(100, self.check_queues)
 
     def on_closing(self):
@@ -326,8 +332,18 @@ class App(ctk.CTk):
             result = messagebox.askyesno("确认退出", "正在处理中，强制退出可能导致字幕不完整。\n确定要退出吗？")
             if not result:
                 return
-        os._exit(0)
+            # 强制终止所有子进程（包括 director 启动的进程）
+            for child in multiprocessing.active_children():
+                child.terminate()
+            for child in multiprocessing.active_children():
+                child.join(timeout=1)
 
+            try:
+                kill_process_tree(os.getpid())
+            except:
+                pass
+
+        os._exit(0)
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
