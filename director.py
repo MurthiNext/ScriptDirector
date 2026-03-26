@@ -8,9 +8,10 @@ import traceback
 import time
 from typing import List, Tuple, Optional, Union, Any
 from logging.handlers import QueueHandler
+import configparser
 
 __author__ = 'MurthiNext'
-__version__ = '1.1.5 Beta'
+__version__ = '1.2.0 Beta'
 __date__ = '2026/03/26'
 
 if os.path.isfile('log.log'):
@@ -36,6 +37,28 @@ def exception_handler(func): # 异常处理器
         except Exception as e:
             logger.error(e)
     return wrapper
+
+def load_advanced_config(config_path='config.ini'):
+    """读取 [advanced] 节的配置，返回字典，未设置的项使用默认值"""
+    config = configparser.ConfigParser()
+    defaults = {
+        'gap_penalty': '-10',
+        'similarity_offset': '50',
+        'default_duration': '5.0',
+    }
+    if os.path.exists(config_path):
+        config.read(config_path, encoding='utf-8')
+        if config.has_section('advanced'):
+            for key, default in defaults.items():
+                if config.has_option('advanced', key):
+                    defaults[key] = config.get('advanced', key)
+    # 转换类型
+    advanced = {
+        'gap_penalty': int(defaults['gap_penalty']),
+        'similarity_offset': int(defaults['similarity_offset']),
+        'default_duration': float(defaults['default_duration']),
+    }
+    return advanced
 
 def format_time_srt(seconds: float) -> str:
     millis = int((seconds - int(seconds)) * 1000)
@@ -76,7 +99,7 @@ def split_sentences_pysbd(text: str, language: str = 'ja') -> List[str]:
     return result
 
 @exception_handler
-def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_penalty: int = -10) -> List[Tuple[Optional[int], Optional[int]]]: # 主干逻辑：对齐台本与听写结果
+def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_penalty: int = -10, similarity_offset: int = 50) -> List[Tuple[Optional[int], Optional[int]]]: # 主干逻辑：对齐台本与听写结果
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
     返回对齐路径列表，每个元素为 (script_idx, whisper_idx)，允许 None 表示插入/删除。
@@ -95,7 +118,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     # 填充 DP 表
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            sim_score = fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - 50
+            sim_score = fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - similarity_offset
             match_score = dp[i-1][j-1] + sim_score
             delete = dp[i-1][j] + gap_penalty
             insert = dp[i][j-1] + gap_penalty
@@ -105,7 +128,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     alignment = []
     i, j = n, m
     while i > 0 or j > 0:
-        if i > 0 and j > 0 and dp[i][j] == dp[i-1][j-1] + (fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - 50):
+        if i > 0 and j > 0 and dp[i][j] == dp[i-1][j-1] + (fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - similarity_offset):
             alignment.append((i-1, j-1))
             logger.debug(f"匹配: 台本 {i-1} <-> Whisper {j-1}")
             i -= 1
@@ -123,7 +146,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     return alignment
 
 @exception_handler
-def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_sents: List[str], whisper_segments: List[Any]) -> List[Tuple[str, float, float]]: # 主干逻辑：对齐时间轴
+def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_sents: List[str], whisper_segments: List[Any], default_duration: float = 5.0) -> List[Tuple[str, float, float]]: # 主干逻辑：对齐时间轴
     """
     根据对齐路径，为每个匹配的台本句子分配时间戳。
     对于未匹配的台本句子，根据前后已匹配句子的时间进行线性插值。
@@ -194,7 +217,7 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
                 start = end - duration
             else:
                 start = 0.0
-                end = 5.0
+                end = default_duration
                 logger.warning("无任何参考时间，使用默认值 0-5 秒")
 
             result.append((text, start, end))
@@ -207,7 +230,8 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
                       local_model_path: str, language: str, device: str,
                       compute_type: str, result_queue: multiprocessing.Queue,
                       log_queue: Optional[multiprocessing.Queue] = None,
-                      preprocess: bool = False) -> None:
+                      preprocess: bool = False,
+                      advanced: Optional[dict] = None) -> None:
     """
     子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
     如果提供了 log_queue，则将日志也发送到该队列。
@@ -245,8 +269,12 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
 
         script_sents = split_sentences_pysbd(script_text, language=language)
         whisper_sents = [seg.text for seg in whisper_segments]
-        alignment = align_sentence_lists(script_sents, whisper_sents)
-        subtitles = map_timestamps(alignment, script_sents, whisper_segments)
+        # 使用高级参数（如果提供）
+        gap_penalty = advanced.get('gap_penalty', -10) if advanced else -10
+        similarity_offset = advanced.get('similarity_offset', 50) if advanced else 50
+        default_duration = advanced.get('default_duration', 5.0) if advanced else 5.0
+        alignment = align_sentence_lists(script_sents, whisper_sents, gap_penalty, similarity_offset)
+        subtitles = map_timestamps(alignment, script_sents, whisper_segments, default_duration)
 
         result_queue.put(subtitles)
         # 确保数据被发送到管道
@@ -268,17 +296,20 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
               local_model_path: str, language: str = 'ja',
               device: str = 'cuda', compute_type: str = 'float16',
               log_queue: Optional[multiprocessing.Queue] = None,
-              preprocess: bool = False) -> None:
+              preprocess: bool = False,
+              config_path: str = 'config.ini') -> None:
     """
     多进程隔离Faster Whisper，直接给这玩意丢进子进程里。
     新增 log_queue 参数，用于接收子进程的实时日志。
     新增 preprocess 参数，若为 True 则对台本进行清洗（删除空行、方括号内容等）。
     """
+    advanced = load_advanced_config(config_path)
+
     result_queue = multiprocessing.Queue()
     p = multiprocessing.Process(
         target=_run_whisper_task,
         args=(audio_path, script_path, output_path, local_model_path,
-              language, device, compute_type, result_queue, log_queue, preprocess)
+              language, device, compute_type, result_queue, log_queue, preprocess, advanced)
     )
     p.start()
     logger.info("已启动子进程进行语音识别...")
@@ -320,6 +351,5 @@ if __name__ == "__main__":
         local_model_path="./faster-whisper-large-v3-turbo",  # 本地模型文件夹路径
         language='ja',                           # 语言代码
         device='cuda',                           # 计算设备 'cuda' 或 'cpu'
-        compute_type='float16',                    # 计算类型
-        preprocess=False
+        compute_type='float16'                    # 计算类型
     )

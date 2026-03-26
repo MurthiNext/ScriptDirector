@@ -24,11 +24,10 @@ def read_config():
         'compute': common.get('compute')
     }
 
-log_queue = multiprocessing.Queue()        # 从子进程接收日志
-status_queue = queue.Queue()                # 从后台线程传递状态
+log_queue = multiprocessing.Queue()
+status_queue = queue.Queue()
 
 def format_log_record(record):
-    """将 LogRecord 对象格式化为字符串"""
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
     return formatter.format(record)
 
@@ -89,18 +88,14 @@ class App(ctk.CTk):
         self.geometry("800x600")
         self.resizable(False, False)
 
-        # 设置外观模式
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
-        # 处理状态标志
         self.is_processing = False
 
-        # 主框架
         self.main_frame = ctk.CTkFrame(self)
         self.main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # 音频文件
         self.audio_label = ctk.CTkLabel(self.main_frame, text="音频文件：")
         self.audio_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.audio_entry = ctk.CTkEntry(self.main_frame, width=400)
@@ -108,7 +103,6 @@ class App(ctk.CTk):
         self.audio_btn = ctk.CTkButton(self.main_frame, text="浏览", width=60, command=self.browse_audio)
         self.audio_btn.grid(row=0, column=2, padx=5, pady=5)
 
-        # 台本文件
         self.script_label = ctk.CTkLabel(self.main_frame, text="台本文件：")
         self.script_label.grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.script_entry = ctk.CTkEntry(self.main_frame, width=400)
@@ -116,42 +110,34 @@ class App(ctk.CTk):
         self.script_btn = ctk.CTkButton(self.main_frame, text="浏览", width=60, command=self.browse_script)
         self.script_btn.grid(row=1, column=2, padx=5, pady=5)
 
-        # 输出名称
         self.name_label = ctk.CTkLabel(self.main_frame, text="输出名称：")
         self.name_label.grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.name_entry = ctk.CTkEntry(self.main_frame, width=400)
         self.name_entry.grid(row=2, column=1, padx=5, pady=5)
 
-        # 输出格式
         self.type_label = ctk.CTkLabel(self.main_frame, text="输出格式：")
         self.type_label.grid(row=3, column=0, padx=5, pady=5, sticky="w")
         self.type_menu = ctk.CTkOptionMenu(self.main_frame, values=["srt", "lrc"])
         self.type_menu.grid(row=3, column=1, padx=5, pady=5, sticky="w")
 
-        # 预处理选项
         self.preprocess_var = tk.BooleanVar()
         self.preprocess_check = ctk.CTkCheckBox(self.main_frame, text="预处理台本（删除空行和方括号标识）",
                                                 variable=self.preprocess_var)
         self.preprocess_check.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky="w")
 
-        # 开始按钮
         self.start_btn = ctk.CTkButton(self.main_frame, text="开始处理", command=self.start_processing)
         self.start_btn.grid(row=5, column=0, columnspan=2, padx=5, pady=10)
 
-        # 日志区域
         self.log_label = ctk.CTkLabel(self.main_frame, text="运行日志：")
         self.log_label.grid(row=6, column=0, padx=5, pady=5, sticky="w")
         self.log_text = ctk.CTkTextbox(self.main_frame, width=760, height=300)
         self.log_text.grid(row=7, column=0, columnspan=3, padx=5, pady=5)
 
-        # 启动后台线程
         self.thread = threading.Thread(target=processing_thread, args=(self,), daemon=True)
         self.thread.start()
 
-        # 定时检查队列
         self.after(100, self.check_queues)
 
-        # 绑定窗口关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def browse_audio(self):
@@ -175,7 +161,6 @@ class App(ctk.CTk):
         if not audio or not script:
             self.append_log("错误：请填写音频文件和台本文件路径")
             return
-        # 清空日志
         self.log_text.delete("1.0", "end")
         self.is_processing = True
         status_queue.put(('start', audio, script, name, fmt, prep))
@@ -185,7 +170,6 @@ class App(ctk.CTk):
         self.log_text.see("end")
 
     def check_queues(self):
-        # 处理日志队列
         try:
             while True:
                 item = log_queue.get_nowait()
@@ -196,7 +180,6 @@ class App(ctk.CTk):
                 self.append_log(msg)
         except queue.Empty:
             pass
-        # 处理状态队列
         try:
             msg = status_queue.get_nowait()
             if msg[0] == 'success':
@@ -209,7 +192,6 @@ class App(ctk.CTk):
                 messagebox.showerror("错误", f"处理失败：{msg[1]}")
         except queue.Empty:
             pass
-        # 继续定时
         self.after(100, self.check_queues)
 
     def on_closing(self):
@@ -217,7 +199,6 @@ class App(ctk.CTk):
             result = messagebox.askyesno("确认退出", "正在处理中，强制退出可能导致字幕不完整。\n确定要退出吗？")
             if not result:
                 return
-        # 强制退出整个进程（包括所有子进程）
         os._exit(0)
 
 if __name__ == '__main__':

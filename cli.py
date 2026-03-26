@@ -30,18 +30,14 @@ def exception_handler(func):
 @click.group(invoke_without_command=True)
 @click.pass_context
 def cli(ctx: click.Context) -> None:
-    """
-    Script Director 命令行程序
-    """
+    """Script Director 命令行程序"""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
 @cli.command(name='help', short_help='显示命令帮助信息。若不指定命令名称，则显示全局帮助。')
 @click.argument('command_name', required=False, type=str)
 def help_command(command_name: Optional[str] = None) -> None:
-    """
-    显示指定命令的详细用法。如果不提供命令名，则显示所有命令的摘要。
-    """
+    """显示指定命令的详细用法。如果不提供命令名，则显示所有命令的摘要。"""
     if command_name:
         if command_name not in cli.commands:
             click.echo(f"错误：未知命令 '{command_name}'")
@@ -63,7 +59,7 @@ def init_config() -> None:
     - 台本与音频所使用的语言代码（例如：zh, en, ja）
     - 设备类型（cuda 或 cpu）
     - 计算类型（float16 或 int8）
-    ...
+    - 可选的高级配置
 
     如果配置文件已存在，会询问是否覆盖。
     """
@@ -74,6 +70,8 @@ def init_config() -> None:
             return
     click.echo('开始配置...')
     conf = configparser.ConfigParser()
+
+    # 获取 common 节参数
     while True:
         model = ask_input('请输入Faster Whisper本地模型路径: ').strip()
         lang = ask_input('请输入台本与音频所使用的语言代码: ').strip()
@@ -88,6 +86,20 @@ def init_config() -> None:
         'device': device,
         'compute': compute
     }
+
+    # 获取 advanced 节参数（可选）
+    click.echo("可选高级参数设置（直接回车使用默认值）:")
+    gap_penalty = ask_input('gap_penalty (对齐惩罚值，默认 -10): ').strip()
+    similarity_offset = ask_input('similarity_offset (相似度偏移，默认 50): ').strip()
+    default_duration = ask_input('default_duration (默认字幕时长/秒，默认 5.0): ').strip()
+    conf['advanced'] = {}
+    if gap_penalty:
+        conf['advanced']['gap_penalty'] = gap_penalty
+    if similarity_offset:
+        conf['advanced']['similarity_offset'] = similarity_offset
+    if default_duration:
+        conf['advanced']['default_duration'] = default_duration
+
     with open('config.ini', 'w', encoding='utf-8') as configfile:
         conf.write(configfile)
     click.echo('配置文件已保存。')
@@ -103,7 +115,7 @@ def modify_config(key_value: str) -> None:
         python cli.py config model=/new/path/to/model
         python cli.py config lang=en
 
-    可修改的配置项包括：model, lang, device, compute。
+    可修改的配置项有common与advanced节，详见已经初始化的config.ini。
     """
     if not os.path.exists('config.ini'):
         click.echo('错误：配置文件不存在，请先运行 init 命令。')
@@ -120,12 +132,18 @@ def modify_config(key_value: str) -> None:
 
     conf = configparser.ConfigParser()
     conf.read('config.ini', encoding='utf-8')
-    if 'common' not in conf:
-        conf['common'] = {}
-    conf['common'][key] = value
+
+    # 判断属于哪个节（默认 common）
+    section = 'common'
+    if key in ['gap_penalty', 'similarity_offset', 'default_duration']:
+        section = 'advanced'
+    if section not in conf:
+        conf[section] = {}
+    conf[section][key] = value
+
     with open('config.ini', 'w', encoding='utf-8') as configfile:
         conf.write(configfile)
-    click.echo(f'已更新配置项 {key} = {value}')
+    click.echo(f'已更新配置项 {section}.{key} = {value}')
 
 @exception_handler
 @cli.command(name='process', short_help='通过台本文件与音频文件生成字幕文件')
