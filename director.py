@@ -11,7 +11,7 @@ from logging.handlers import QueueHandler
 import configparser
 
 __author__ = 'MurthiNext'
-__version__ = '1.2.0 Beta'
+__version__ = '1.2.0 Release'
 __date__ = '2026/03/26'
 
 if os.path.isfile('log.log'):
