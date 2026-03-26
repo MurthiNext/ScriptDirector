@@ -11,11 +11,13 @@ import logging
 
 from director import direct_it
 
+# ---------- 配置读取 ----------
 def read_config():
+    """读取配置文件，返回 common 节的配置字典"""
     config = configparser.ConfigParser()
     config.read('config.ini', encoding='utf-8')
     if 'common' not in config:
-        raise RuntimeError("配置文件缺失 [common] 节，请先运行 init 命令。")
+        return None
     common = config['common']
     return {
         'model': common.get('model'),
@@ -31,19 +33,28 @@ def format_log_record(record):
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
     return formatter.format(record)
 
-def open_file_dialog(file_type):
+def open_file_dialog(file_type, initialdir=''):
     root = tk.Tk()
     root.withdraw()
     if file_type == 'audio':
         path = filedialog.askopenfilename(
             title="选择音频文件",
+            initialdir=initialdir,
             filetypes=[("音频文件", "*.wav *.mp3 *.flac *.m4a")]
         )
-    else:
+    elif file_type == 'script':
         path = filedialog.askopenfilename(
             title="选择台本文件",
+            initialdir=initialdir,
             filetypes=[("文本文件", "*.txt")]
         )
+    elif file_type == 'model':
+        path = filedialog.askdirectory(
+            title="选择模型文件夹",
+            initialdir=initialdir
+        )
+    else:
+        path = ''
     root.destroy()
     return path
 
@@ -52,26 +63,21 @@ def processing_thread(app):
         try:
             msg = status_queue.get(timeout=0.5)
             if msg[0] == 'start':
-                (_, audio, script, name, fmt, prep) = msg
+                (_, audio, script, name, fmt, prep, model_path, language, device, compute_type) = msg
+                # 直接使用 GUI 传入的参数
                 try:
-                    config = read_config()
-                except Exception as e:
-                    status_queue.put(('error', f"读取配置文件失败：{e}"))
-                    continue
+                    audio_dir = os.path.dirname(audio) or '.'
+                    base = name if name else os.path.splitext(os.path.basename(audio))[0]
+                    output_path = os.path.join(audio_dir, f"{base}.{fmt}")
 
-                audio_dir = os.path.dirname(audio) or '.'
-                base = name if name else os.path.splitext(os.path.basename(audio))[0]
-                output_path = os.path.join(audio_dir, f"{base}.{fmt}")
-
-                try:
                     direct_it(
                         audio_path=audio,
                         script_path=script,
                         output_path=output_path,
-                        local_model_path=config['model'],
-                        language=config['lang'],
-                        device=config['device'],
-                        compute_type=config['compute'],
+                        local_model_path=model_path,
+                        language=language,
+                        device=device,
+                        compute_type=compute_type,
                         log_queue=log_queue,
                         preprocess=prep
                     )
@@ -85,7 +91,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Script Director GUI")
-        self.geometry("800x600")
+        self.geometry("800x700")
         self.resizable(False, False)
 
         # 外观设置
@@ -93,6 +99,9 @@ class App(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.is_processing = False
+
+        # 读取配置文件默认值（如果存在）
+        self.config_defaults = read_config()
 
         # 主框架
         self.main_frame = ctk.CTkFrame(self)
@@ -103,8 +112,49 @@ class App(ctk.CTk):
         self.main_frame.grid_columnconfigure(1, weight=1)  # 输入框列
         self.main_frame.grid_columnconfigure(2, weight=0)  # 按钮列
 
-        # 行号计数器
         row = 0
+
+        # 模型路径
+        self.model_label = ctk.CTkLabel(self.main_frame, text="模型路径：", anchor="e", width=100)
+        self.model_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.model_entry = ctk.CTkEntry(self.main_frame)
+        self.model_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
+        self.model_btn = ctk.CTkButton(self.main_frame, text="浏览", width=80, command=self.browse_model)
+        self.model_btn.grid(row=row, column=2, padx=5, pady=5)
+
+        row += 1
+
+        # 语言代码
+        self.lang_label = ctk.CTkLabel(self.main_frame, text="语言代码：", anchor="e", width=100)
+        self.lang_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.lang_combo = ctk.CTkOptionMenu(self.main_frame, values=["ja", "zh", "en", "ko", "fr", "de", "ru", "es"])
+        self.lang_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
+        self.lang_combo.set("ja")
+
+        row += 1
+
+        # 设备类型
+        self.device_label = ctk.CTkLabel(self.main_frame, text="设备类型：", anchor="e", width=100)
+        self.device_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.device_combo = ctk.CTkOptionMenu(self.main_frame, values=["cuda", "cpu"])
+        self.device_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
+        self.device_combo.set("cuda")
+
+        row += 1
+
+        # 计算类型
+        self.compute_label = ctk.CTkLabel(self.main_frame, text="计算类型：", anchor="e", width=100)
+        self.compute_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.compute_combo = ctk.CTkOptionMenu(self.main_frame, values=["float16", "int8_float16", "int8", "float32"])
+        self.compute_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
+        self.compute_combo.set("float16")
+
+        row += 1
+
+        # 分隔线
+        separator = ctk.CTkFrame(self.main_frame, height=2, fg_color="gray")
+        separator.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="ew")
+        row += 1
 
         # 音频文件
         self.audio_label = ctk.CTkLabel(self.main_frame, text="音频文件：", anchor="e", width=100)
@@ -143,7 +193,7 @@ class App(ctk.CTk):
 
         row += 1
 
-        # 预处理选项（独立一行）
+        # 预处理选项
         self.preprocess_var = tk.BooleanVar()
         self.preprocess_check = ctk.CTkCheckBox(
             self.main_frame,
@@ -154,7 +204,7 @@ class App(ctk.CTk):
 
         row += 1
 
-        # 开始按钮（居中）
+        # 开始按钮
         self.start_btn = ctk.CTkButton(self.main_frame, text="开始处理", width=150, height=35, command=self.start_processing)
         self.start_btn.grid(row=row, column=0, columnspan=3, padx=5, pady=10)
 
@@ -171,6 +221,17 @@ class App(ctk.CTk):
         # 使日志文本框可扩展
         self.main_frame.grid_rowconfigure(row, weight=1)
 
+        # 如果存在配置文件，将默认值填充到控件
+        if self.config_defaults:
+            if self.config_defaults.get('model'):
+                self.model_entry.insert(0, self.config_defaults['model'])
+            if self.config_defaults.get('lang'):
+                self.lang_combo.set(self.config_defaults['lang'])
+            if self.config_defaults.get('device'):
+                self.device_combo.set(self.config_defaults['device'])
+            if self.config_defaults.get('compute'):
+                self.compute_combo.set(self.config_defaults['compute'])
+
         # 启动后台线程
         self.thread = threading.Thread(target=processing_thread, args=(self,), daemon=True)
         self.thread.start()
@@ -182,16 +243,25 @@ class App(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def browse_audio(self):
-        path = open_file_dialog('audio')
+        initial_dir = os.path.dirname(self.audio_entry.get()) if self.audio_entry.get() else ''
+        path = open_file_dialog('audio', initial_dir)
         if path:
             self.audio_entry.delete(0, "end")
             self.audio_entry.insert(0, path)
 
     def browse_script(self):
-        path = open_file_dialog('script')
+        initial_dir = os.path.dirname(self.script_entry.get()) if self.script_entry.get() else ''
+        path = open_file_dialog('script', initial_dir)
         if path:
             self.script_entry.delete(0, "end")
             self.script_entry.insert(0, path)
+
+    def browse_model(self):
+        initial_dir = self.model_entry.get() if self.model_entry.get() else ''
+        path = open_file_dialog('model', initial_dir)
+        if path:
+            self.model_entry.delete(0, "end")
+            self.model_entry.insert(0, path)
 
     def start_processing(self):
         audio = self.audio_entry.get()
@@ -199,13 +269,25 @@ class App(ctk.CTk):
         name = self.name_entry.get()
         fmt = self.type_menu.get()
         prep = self.preprocess_var.get()
+        model_path = self.model_entry.get()
+        language = self.lang_combo.get()
+        device = self.device_combo.get()
+        compute_type = self.compute_combo.get()
+
         if not audio or not script:
             self.append_log("错误：请填写音频文件和台本文件路径")
             return
+        if not model_path:
+            self.append_log("错误：请填写模型路径")
+            return
+        if not language:
+            self.append_log("错误：请选择语言代码")
+            return
+
         # 清空日志
         self.log_text.delete("1.0", "end")
         self.is_processing = True
-        status_queue.put(('start', audio, script, name, fmt, prep))
+        status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type))
 
     def append_log(self, msg):
         self.log_text.insert("end", msg + "\n")
