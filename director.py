@@ -320,5 +320,6 @@ if __name__ == "__main__":
         local_model_path="./faster-whisper-large-v3-turbo",  # 本地模型文件夹路径
         language='ja',                           # 语言代码
         device='cuda',                           # 计算设备 'cuda' 或 'cpu'
-        compute_type='float16'                    # 计算类型
+        compute_type='float16',                    # 计算类型
+        preprocess=False
     )
