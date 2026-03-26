@@ -135,7 +135,7 @@ default_duration = 5.0
 ## 项目结构
 - `director.py`：核心模块，包含语音识别、句子对齐、时间戳映射、字幕保存等功能。
 - `cli.py`：命令行入口，处理参数、配置文件并调用 `director.direct_it`。
-- `app.py`：图形化界面入口，基于 customtkinter 实现。
+- `gui.py`：图形化界面入口，基于 customtkinter 实现。
 - `pre_process.py`：台本预处理模块，提供文本清洗功能（删除空行、方括号内容等）。
 
 ## 注意事项
