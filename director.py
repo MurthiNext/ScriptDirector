@@ -248,9 +248,9 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
 def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
                       local_model_path: str, language: str, device: str,
                       compute_type: str, result_queue: multiprocessing.Queue,
-                      log_queue: Optional[multiprocessing.Queue] = None,
                       preprocess: bool = False,
                       advanced: Optional[dict] = None,
+                      log_queue: Optional[multiprocessing.Queue] = None,
                       progress_queue: Optional[multiprocessing.Queue] = None) -> None:
     """
     子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
@@ -340,9 +340,9 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
 def direct_it(audio_path: str, script_path: str, output_path: str,
               local_model_path: str, language: str = 'ja',
               device: str = 'cuda', compute_type: str = 'float16',
-              log_queue: Optional[multiprocessing.Queue] = None,
               preprocess: bool = False,
               config_path: str = 'config.ini',
+              log_queue: Optional[multiprocessing.Queue] = None,
               progress_queue: Optional[multiprocessing.Queue] = None) -> None:
     """
     多进程隔离Faster Whisper，直接给这玩意丢进子进程里。
