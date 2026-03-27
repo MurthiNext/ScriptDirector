@@ -12,8 +12,8 @@ import configparser
 import json
 
 __author__ = 'MurthiNext'
-__version__ = '1.2.1 Release'
-__date__ = '2026/03/27'
+__version__ = '1.2.0 Release'
+__date__ = '2026/03/26'
 
 if os.path.isfile('log.log'):
     with open('log.log','w',encoding='utf-8') as wf:
@@ -155,7 +155,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     return alignment
 
 @exception_handler
-def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_sents: List[str], whisper_segments: List[Any], default_duration: float = 5.0, max_combine: int = 5) -> List[Tuple[str, float, float]]: # 主干逻辑：对齐时间轴
+def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_sents: List[str], whisper_segments: List[Any], default_duration: float = 5.0, max_combine: int = 5, progress_queue: Optional[multiprocessing.Queue] = None) -> List[Tuple[str, float, float]]: # 主干逻辑：对齐时间轴
     """
     根据对齐路径，为每个匹配的台本句子分配时间戳。
     对于未匹配的台本句子，根据前后已匹配句子的时间进行线性插值。
@@ -186,7 +186,8 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
 
     # 第三步：为所有台本句子生成最终列表（包括未匹配的，通过插值）
     result = []
-    for script_idx in range(len(script_sents)):
+    total_sents = len(script_sents)
+    for idx, script_idx in enumerate(range(total_sents)):
         text = script_sents[script_idx]
         if script_idx in time_map:
             start, end = time_map[script_idx]
@@ -236,6 +237,11 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
             result.append((text, start, end))
             logger.debug(f"插值句子 {script_idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
 
+        # 发送对齐进度 (95% 到 100%)
+        if progress_queue is not None:
+            progress = 95 + (idx + 1) / total_sents * 5
+            progress_queue.put(int(progress))
+
     logger.info(f"最终生成 {len(result)} 条字幕")
     return result
 
@@ -244,10 +250,12 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
                       compute_type: str, result_queue: multiprocessing.Queue,
                       log_queue: Optional[multiprocessing.Queue] = None,
                       preprocess: bool = False,
-                      advanced: Optional[dict] = None) -> None:
+                      advanced: Optional[dict] = None,
+                      progress_queue: Optional[multiprocessing.Queue] = None) -> None:
     """
     子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
     如果提供了 log_queue，则将日志也发送到该队列。
+    如果提供了 progress_queue，则发送进度（0-100 整数）
     """
     try:
         # 如果提供了日志队列，则添加 QueueHandler
@@ -269,7 +277,6 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
         model = WhisperModel(local_model_path, device=device, compute_type=compute_type)
 
         logger.info("开始转录音频...")
-        # 传递 VAD 参数
         segments, info = model.transcribe(
             audio_path,
             language=language,
@@ -279,12 +286,19 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
             vad_parameters=vad_parameters if vad_filter else None
         )
 
+        total_duration = info.duration  # 总时长（秒）
         whisper_segments = []
         for idx, seg in enumerate(segments):
             whisper_segments.append(seg)
+            # 发送识别进度 (0-95%)
+            if progress_queue is not None and total_duration > 0:
+                progress = int((seg.end / total_duration) * 95)
+                progress_queue.put(progress)
             logger.info(f"识别片段 {idx}\t{format_time_lrc(seg.start)}-{format_time_lrc(seg.end)} | {seg.text}")
 
         logger.info(f"识别完成，共 {len(whisper_segments)} 个片段")
+        if progress_queue is not None:
+            progress_queue.put(95)  # 识别阶段完成，进入对齐阶段
 
         # 读取台本
         with open(script_path, 'r', encoding='utf-8') as f:
@@ -301,7 +315,8 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
         script_sents = split_sentences_pysbd(script_text, language=language)
         whisper_sents = [seg.text for seg in whisper_segments]
         alignment = align_sentence_lists(script_sents, whisper_sents, gap_penalty, similarity_offset)
-        subtitles = map_timestamps(alignment, script_sents, whisper_segments, default_duration, max_combine)
+        # 传递 progress_queue 以发送对齐进度
+        subtitles = map_timestamps(alignment, script_sents, whisper_segments, default_duration, max_combine, progress_queue)
 
         result_queue.put(subtitles)
         # 确保数据被发送到管道
@@ -310,6 +325,9 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
         # 缓冲时间
         time.sleep(0.5)
         logger.info("处理完成，结果已放回队列。")
+        # 发送完成信号（进度100%）
+        if progress_queue is not None:
+            progress_queue.put(100)
     except Exception as e:
         error_msg = f"子进程发生错误：{str(e)}\n{traceback.format_exc()}"
         result_queue.put(error_msg)
@@ -324,11 +342,13 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
               device: str = 'cuda', compute_type: str = 'float16',
               log_queue: Optional[multiprocessing.Queue] = None,
               preprocess: bool = False,
-              config_path: str = 'config.ini') -> None:
+              config_path: str = 'config.ini',
+              progress_queue: Optional[multiprocessing.Queue] = None) -> None:
     """
     多进程隔离Faster Whisper，直接给这玩意丢进子进程里。
     新增 log_queue 参数，用于接收子进程的实时日志。
     新增 preprocess 参数，若为 True 则对台本进行清洗（删除空行、方括号内容等）。
+    新增 progress_queue 参数，用于接收子进程的进度（0-100 整数）。
     """
     advanced = load_advanced_config(config_path)
 
@@ -336,7 +356,7 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
     p = multiprocessing.Process(
         target=_run_whisper_task,
         args=(audio_path, script_path, output_path, local_model_path,
-              language, device, compute_type, result_queue, log_queue, preprocess, advanced)
+              language, device, compute_type, result_queue, log_queue, preprocess, advanced, progress_queue)
     )
     p.start()
     logger.info("已启动子进程进行语音识别...")
