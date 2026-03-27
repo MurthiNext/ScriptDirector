@@ -10,8 +10,39 @@ import customtkinter as ctk
 import logging
 import signal
 import psutil
+import json
 
 from director import direct_it
+
+def load_advanced_config(config_path='config.ini'):
+    """读取 [advanced] 节的配置，返回字典，未设置的项使用默认值"""
+    config = configparser.ConfigParser()
+    defaults = {
+        'gap_penalty': '-10',
+        'similarity_offset': '50',
+        'default_duration': '5.0',
+        'max_combine': '5',
+        'beam_size': '5',
+        'vad_filter': 'False',
+        'vad_parameters': '{}',
+    }
+    if os.path.exists(config_path):
+        config.read(config_path, encoding='utf-8')
+        if config.has_section('advanced'):
+            for key, default in defaults.items():
+                if config.has_option('advanced', key):
+                    defaults[key] = config.get('advanced', key)
+    # 转换类型
+    advanced = {
+        'gap_penalty': int(defaults['gap_penalty']),
+        'similarity_offset': int(defaults['similarity_offset']),
+        'default_duration': float(defaults['default_duration']),
+        'max_combine': int(defaults['max_combine']),
+        'beam_size': int(defaults['beam_size']),
+        'vad_filter': defaults['vad_filter'].lower() in ('true', '1', 'yes'),
+        'vad_parameters': json.loads(defaults['vad_parameters']),
+    }
+    return advanced
 
 def read_config():
     config = configparser.ConfigParser()
@@ -114,6 +145,15 @@ class App(ctk.CTk):
 
         # 读取配置文件默认值
         self.config_defaults = read_config()
+        # 读取高级配置并记录日志（打印到控制台）
+        self.advanced_config = load_advanced_config()
+        print(f"[Advanced] 当前高级参数配置: gap_penalty={self.advanced_config['gap_penalty']}, "
+              f"similarity_offset={self.advanced_config['similarity_offset']}, "
+              f"default_duration={self.advanced_config['default_duration']}, "
+              f"max_combine={self.advanced_config['max_combine']}, "
+              f"beam_size={self.advanced_config['beam_size']}, "
+              f"vad_filter={self.advanced_config['vad_filter']}, "
+              f"vad_parameters={self.advanced_config['vad_parameters']}")
 
         # 主框架
         self.main_frame = ctk.CTkFrame(self)
@@ -295,6 +335,28 @@ class App(ctk.CTk):
             return
 
         self.log_text.delete("1.0", "end")
+
+        # 打印配置信息到日志
+        self.append_log("========== 当前配置 ==========")
+        self.append_log(f"[Common] 模型路径: {model_path}")
+        self.append_log(f"[Common] 语言代码: {language}")
+        self.append_log(f"[Common] 设备类型: {device}")
+        self.append_log(f"[Common] 计算类型: {compute_type}")
+
+        # 读取 advanced 配置并打印
+        try:
+            advanced = load_advanced_config()
+            self.append_log("[Advanced] gap_penalty: {}".format(advanced['gap_penalty']))
+            self.append_log("[Advanced] similarity_offset: {}".format(advanced['similarity_offset']))
+            self.append_log("[Advanced] default_duration: {}".format(advanced['default_duration']))
+            self.append_log("[Advanced] max_combine: {}".format(advanced['max_combine']))
+            self.append_log("[Advanced] beam_size: {}".format(advanced['beam_size']))
+            self.append_log("[Advanced] vad_filter: {}".format(advanced['vad_filter']))
+            self.append_log("[Advanced] vad_parameters: {}".format(advanced['vad_parameters']))
+        except Exception as e:
+            self.append_log(f"警告：读取 advanced 配置失败 - {e}")
+        self.append_log("=============================")
+
         self.is_processing = True
         status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type))
 
