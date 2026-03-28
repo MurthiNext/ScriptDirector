@@ -391,47 +391,47 @@ class App(ctk.CTk):
         self.log_text.insert("end", msg + "\n")
         self.log_text.see("end")
 
-def check_queues(self):
-    # 处理日志队列
-    try:
-        while True:
-            item = log_queue.get_nowait()
-            if isinstance(item, logging.LogRecord):
-                msg = format_log_record(item)
-            else:
-                msg = str(item)
-            self.append_log(msg)
-    except queue.Empty:
-        pass
+    def check_queues(self):
+        # 处理日志队列
+        try:
+            while True:
+                item = log_queue.get_nowait()
+                if isinstance(item, logging.LogRecord):
+                    msg = format_log_record(item)
+                else:
+                    msg = str(item)
+                self.append_log(msg)
+        except queue.Empty:
+            pass
 
-    # 处理进度队列
-    try:
-        while True:
-            progress = progress_queue.get_nowait()
-            self.progress_bar.set(progress / 100.0)
-            self.progress_text.configure(text=f"{progress}%")
-            if progress == 100:
+        # 处理进度队列
+        try:
+            while True:
+                progress = progress_queue.get_nowait()
+                self.progress_bar.set(progress / 100.0)
+                self.progress_text.configure(text=f"{progress}%")
+                if progress == 100:
+                    self.is_processing = False
+        except queue.Empty:
+            pass
+
+        # 处理状态队列
+        try:
+            msg = status_queue.get_nowait()
+            if msg[0] == 'success':
                 self.is_processing = False
-    except queue.Empty:
-        pass
+                self.append_log(f"成功生成字幕：{msg[1]}")
+                self.progress_bar.set(1.0)
+                self.progress_text.configure(text="100%")
+                messagebox.showinfo("完成", f"字幕已生成：{msg[1]}")
+            elif msg[0] == 'error':
+                self.is_processing = False
+                self.append_log(f"错误：{msg[1]}")
+                messagebox.showerror("错误", f"处理失败：{msg[1]}")
+        except queue.Empty:
+            pass
 
-    # 处理状态队列
-    try:
-        msg = status_queue.get_nowait()
-        if msg[0] == 'success':
-            self.is_processing = False
-            self.append_log(f"成功生成字幕：{msg[1]}")
-            self.progress_bar.set(1.0)
-            self.progress_text.configure(text="100%")
-            messagebox.showinfo("完成", f"字幕已生成：{msg[1]}")
-        elif msg[0] == 'error':
-            self.is_processing = False
-            self.append_log(f"错误：{msg[1]}")
-            messagebox.showerror("错误", f"处理失败：{msg[1]}")
-    except queue.Empty:
-        pass
-
-    self.after(100, self.check_queues)
+        self.after(100, self.check_queues)
 
     def on_closing(self):
         if self.is_processing:
