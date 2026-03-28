@@ -356,7 +356,8 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
     p = multiprocessing.Process(
         target=_run_whisper_task,
         args=(audio_path, script_path, output_path, local_model_path,
-              language, device, compute_type, result_queue, log_queue, preprocess, advanced, progress_queue)
+                language, device, compute_type, result_queue,
+                preprocess, advanced, log_queue, progress_queue)
     )
     p.start()
     logger.info("已启动子进程进行语音识别...")
