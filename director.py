@@ -12,8 +12,8 @@ import configparser
 import json
 
 __author__ = 'MurthiNext'
-__version__ = '1.2.0 Release'
-__date__ = '2026/03/26'
+__version__ = '1.2.5 Release'
+__date__ = '2026/03/28'
 
 if os.path.isfile('log.log'):
     with open('log.log','w',encoding='utf-8') as wf:
