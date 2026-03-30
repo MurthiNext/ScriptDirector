@@ -30,7 +30,7 @@
    ```bash
    pip install -r requirements.txt
    ```
-3. 下载 Faster Whisper 模型（例如 [faster-whisper-large-v3](https://huggingface.co/guillaumekln/faster-whisper-large-v3)）并解压到本地目录。
+3. 下载 Faster Whisper 模型（例如 [faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3)）并解压到本地目录。
 
 ## 使用方法
 
