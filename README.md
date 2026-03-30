@@ -70,8 +70,7 @@ python cli.py init
 - `vad_filter`：启用语音活动检测，默认 `False`
 - `vad_parameters`：VAD 参数（JSON 格式），默认 `{}`
 
-这些参数会自动写入配置文件的 `[advanced]` 节，便于后续调优。
-有关配置信息的详细介绍请看下文。
+这些参数会自动写入配置文件的 `[advanced]` 节，便于后续调优。 有关配置信息的详细介绍请看下文。
 
 #### 修改配置
 如需修改配置项，可使用 `config` 命令：
