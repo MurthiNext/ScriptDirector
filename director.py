@@ -30,14 +30,6 @@ if not logger.handlers:
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-def exception_handler(func): # 异常处理器
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            logger.error(e, exc_info=True)
-    return wrapper
-
 def load_advanced_config(config_path='config.ini'):
     """读取 [advanced] 节的配置，返回字典，未设置的项使用默认值"""
     config = configparser.ConfigParser()
