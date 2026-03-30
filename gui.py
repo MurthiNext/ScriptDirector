@@ -120,7 +120,8 @@ def processing_thread(app):
         try:
             msg = status_queue.get(timeout=0.5)
             if msg[0] == 'start':
-                (_, audio, script, name, fmt, prep, model_path, language, device, compute_type) = msg
+                # 解包消息，增加 short_sentences 参数
+                (_, audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences) = msg
                 try:
                     audio_dir = os.path.dirname(audio) or '.'
                     base = name if name else os.path.splitext(os.path.basename(audio))[0]
@@ -136,7 +137,8 @@ def processing_thread(app):
                         compute_type=compute_type,
                         log_queue=log_queue,
                         preprocess=prep,
-                        progress_queue=progress_queue
+                        progress_queue=progress_queue,
+                        short_sentences=short_sentences   # 新增
                     )
                     status_queue.put(('success', output_path))
                 except Exception as e:
@@ -273,6 +275,16 @@ class App(ctk.CTk):
         self.preprocess_check.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="w")
         row += 1
 
+        # 短句模式选项
+        self.short_sentences_var = tk.BooleanVar()
+        self.short_sentences_check = ctk.CTkCheckBox(
+            self.left_frame,
+            text="短句模式（按标点分割长句，生成更精确的字幕）",
+            variable=self.short_sentences_var
+        )
+        self.short_sentences_check.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="w")
+        row += 1
+
         # 开始按钮
         self.start_btn = ctk.CTkButton(self.left_frame, text="开始处理", width=150, height=35, command=self.start_processing)
         self.start_btn.grid(row=row, column=0, columnspan=3, padx=5, pady=10)
@@ -348,6 +360,7 @@ class App(ctk.CTk):
         language = self.lang_combo.get()
         device = self.device_combo.get()
         compute_type = self.compute_combo.get()
+        short_sentences = self.short_sentences_var.get()   # 获取短句模式标志
 
         if not audio or not script:
             self.append_log("错误：请填写音频文件和台本文件路径")
@@ -385,7 +398,7 @@ class App(ctk.CTk):
         self.append_log("=============================")
 
         self.is_processing = True
-        status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type))
+        status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences))
 
     def append_log(self, msg):
         self.log_text.insert("end", msg + "\n")

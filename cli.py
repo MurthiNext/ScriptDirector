@@ -165,7 +165,9 @@ def modify_config(key_value: str) -> None:
 @click.option('-n', '--name', type=str, default=None, help='指定输出文件的名称，该项不包含扩展名')
 @click.option('-p', '--preprocess', is_flag=True, default=False,
               help='预处理台本，删除空行和方括号内容（如角色标识）')
-def process_command(input_str: str, type: str, name: str, preprocess: bool) -> None:
+@click.option('-s', '--shorter', is_flag=True, default=False,
+              help='启用短句模式（按标点分割长句，生成更精确的字幕）')
+def process_command(input_str: str, type: str, name: str, preprocess: bool, shorter: bool) -> None:
     """
     处理音频和台本，生成字幕文件。
 
@@ -187,6 +189,8 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool) -> N
     - 删除空行
     - 删除方括号内的内容（例如 [人名]、[动作说明]）
     - 去除多余空格
+
+    如果指定 -s 或 --shorter，则启用短句模式，按标点分割长句，生成更精确的字幕。
     """
     files = [f.strip() for f in input_str.split(',')]
     if len(files) != 2:
@@ -241,7 +245,8 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool) -> N
         language=lang,
         device=device,
         compute_type=compute,
-        preprocess=preprocess
+        preprocess=preprocess,
+        short_sentences=shorter
     )
     click.echo(f'字幕已生成：{output_path}')
 
