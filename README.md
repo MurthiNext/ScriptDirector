@@ -31,14 +31,14 @@
 
 #### 以下列出主流Faster Whisper模型的下载地址。
 * 快上加快
-   [Faster Whisper Large V3 Turbo](https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2)
+   * [Faster Whisper Large V3 Turbo](https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2)
 * 极致精度 
-   [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3)
-   [Faster Whisper Large V2](https://huggingface.co/Systran/faster-whisper-large-v2)
+   * [Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3)
+   * [Faster Whisper Large V2](https://huggingface.co/Systran/faster-whisper-large-v2)
 * 性能取舍
-   [Faster Whisper Medium](https://huggingface.co/Systran/faster-whisper-medium)
-   [Faster Whisper Small](https://huggingface.co/Systran/faster-whisper-small)
-   [Faster Whisper Tiny](https://huggingface.co/Systran/faster-whisper-tiny)
+   * [Faster Whisper Medium](https://huggingface.co/Systran/faster-whisper-medium)
+   * [Faster Whisper Small](https://huggingface.co/Systran/faster-whisper-small)
+   * [Faster Whisper Tiny](https://huggingface.co/Systran/faster-whisper-tiny)
 
 以上超链接均指向[Huggingface](https://huggingface.co/)，若你身处中国大陆无法访问，可尝试使用[HF-Mirror](https://hf-mirror.com/)此镜像网站。
 
