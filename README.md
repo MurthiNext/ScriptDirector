@@ -7,10 +7,7 @@
 
 - 🎙️ 基于 Faster Whisper 的高质量语音识别
 - 📄 支持日语（`ja`）、中文（`zh`）、英文（`en`）等多语言台本分割（使用 `pysbd`）
-- ✨ 台本预处理：自动删除空行、去除方括号（`[]` 和 `【】`）等角色标识，保留纯文本
 - 🔗 智能句子对齐：采用 Needleman-Wunsch 风格算法，处理插入、删除和替换
-- ⏱️ 对未匹配的句子进行线性插值，确保字幕完整
-- 📝 输出格式自动识别：根据输出文件后缀生成 SRT 或 LRC
 - ⚙️ 命令行界面（CLI）和配置文件支持，方便重复使用
 - 🖥️ 图形化界面（GUI）支持（基于 customtkinter），提供更友好的操作体验
 - 🎛️ 高级参数可配置：通过配置文件调整对齐惩罚、相似度偏移、默认时长、束搜索宽度、VAD（语音活动检测）等，适应不同场景
@@ -30,7 +27,20 @@
    ```bash
    pip install -r requirements.txt
    ```
-3. 下载 Faster Whisper 模型（例如 [faster-whisper-large-v3](https://huggingface.co/Systran/faster-whisper-large-v3)）并解压到本地目录。
+3. 下载 Faster Whisper 模型并解压到本地目录。
+
+#### 以下列出主流Faster Whisper模型的下载地址。
+* 快上加快
+[Faster Whisper Large V3 Turbo](https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2)
+* 极致精度 
+[Faster Whisper Large V3](https://huggingface.co/Systran/faster-whisper-large-v3)
+[Faster Whisper Large V2](https://huggingface.co/Systran/faster-whisper-large-v2)
+* 性能取舍
+[Faster Whisper Medium](https://huggingface.co/Systran/faster-whisper-medium)
+[Faster Whisper Small](https://huggingface.co/Systran/faster-whisper-small)
+[Faster Whisper Tiny](https://huggingface.co/Systran/faster-whisper-tiny)
+
+以上超链接均指向[Huggingface](https://huggingface.co/)，若你身处中国大陆无法访问，可尝试使用[HF-Mirror](https://hf-mirror.com/)此镜像网站。
 
 ## 使用方法
 
@@ -55,12 +65,13 @@ python cli.py init
 - `gap_penalty`：对齐惩罚值，默认 `-10`
 - `similarity_offset`：相似度偏移，默认 `50`
 - `default_duration`：默认字幕时长（秒），默认 `5.0`
-- `max_combine`：最大合并片段数（限制一句台本合并的 Whisper 片段数），默认 `5`
-- `beam_size`：束搜索宽度（影响识别速度和准确度），默认 `5`
+- `max_combine`：最大合并片段数，默认 `5`
+- `beam_size`：束搜索宽度，默认 `5`
 - `vad_filter`：启用语音活动检测，默认 `False`
 - `vad_parameters`：VAD 参数（JSON 格式），默认 `{}`
 
 这些参数会自动写入配置文件的 `[advanced]` 节，便于后续调优。
+有关配置信息的详细介绍请看下文。
 
 #### 修改配置
 如需修改配置项，可使用 `config` 命令：
