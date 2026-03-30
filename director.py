@@ -91,13 +91,28 @@ def save_srt(subtitles: List[Tuple[str, float, float]], output_path: str) -> Non
     logger.info(f"已保存 SRT 字幕到 {output_path}")
 
 def save_lrc(subtitles: List[Tuple[str, float, float]], output_path: str) -> None:
+    subtitles = normalize_subtitles(subtitles)
     with open(output_path, 'w', encoding='utf-8') as f:
         for text, start, _ in subtitles:
             f.write(f"{format_time_lrc(start)} {text}\n")
         f.close()
     logger.info(f"已保存 LRC 歌词到 {output_path}")
 
+def normalize_subtitle_text(text: str) -> str:
+    """删除字幕文本中的空行和内部换行，将多行合并为一行。"""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return ' '.join(lines)
+
+def normalize_subtitles(subtitles: List[Tuple[str, float, float]]) -> List[Tuple[str, float, float]]:
+    normalized = []
+    for text, start, end in subtitles:
+        text = normalize_subtitle_text(text)
+        if text:
+            normalized.append((text, start, end))
+    return normalized
+
 def split_sentences_pysbd(text: str, language: str = 'ja') -> List[str]:
+    text = text.replace('\r', ' ').replace('\n', ' ')
     segmenter = pysbd.Segmenter(language=language, clean=False)
     sentences = segmenter.segment(text)
     result = [s.strip() for s in sentences if s.strip()]
@@ -153,7 +168,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     return alignment
 
 def split_text_by_punctuation(text: str) -> List[str]:
-    """按标点分割文本，返回短句列表，每个短句以标点结尾"""
+    text = text.replace('\r', ' ').replace('\n', ' ')
     parts = re.split(r'(?<=[。！？…、．])\s*', text)
     return [p.strip() for p in parts if p.strip()]
 
@@ -235,6 +250,9 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
     result = []
     total_sents = len(script_sents)
     for idx, text in enumerate(script_sents):
+        text = normalize_subtitle_text(text)
+        if not text:
+            continue
         if idx in time_map:
             start, end = time_map[idx]
             result.append((text, start, end))
@@ -281,6 +299,7 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
     for text, start, end in result:
         if not is_punctuation_only(text):
             filtered.append((text, start, end))
+    filtered = normalize_subtitles(filtered)
     logger.info(f"生成 {len(filtered)} 条字幕（过滤后）")
     return filtered
 
@@ -351,12 +370,6 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
               log_queue: Optional[multiprocessing.Queue] = None,
               progress_queue: Optional[multiprocessing.Queue] = None,
               short_sentences: bool = False) -> None:
-    """
-    多进程隔离Faster Whisper，直接给这玩意丢进子进程里。
-    新增 log_queue 参数，用于接收子进程的实时日志。
-    新增 preprocess 参数，若为 True 则对台本进行清洗（删除空行、方括号内容等）。
-    新增 progress_queue 参数，用于接收子进程的进度（0-100 整数）。
-    """
     advanced = load_advanced_config(config_path)
 
     result_queue = multiprocessing.Queue()
@@ -406,5 +419,5 @@ if __name__ == "__main__":
         language='ja',                           # 语言代码
         device='cuda',                           # 计算设备 'cuda' 或 'cpu'
         compute_type='float16',                   # 计算类型
-        short_sentences=False                    # 启用短句模式
+        short_sentences=True                    # 启用短句模式
     )
