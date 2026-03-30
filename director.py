@@ -230,12 +230,6 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
         if s_idx is not None and w_idx is not None:
             start = all_words[w_idx][1]
             end = all_words[w_idx][2]
-            # 如果句子匹配多个单词，需要扩展范围？当前每个句子只匹配一个单词，但实际应匹配连续单词。
-            # 但 align_sentence_lists 是将句子与单词一对一匹配，所以这里每个句子只对应一个单词。
-            # 更好的做法是使用基于字符的映射，但为简单起见，我们暂时只取单个单词的时间。
-            # 实际上，句子可能对应多个单词，但我们只取匹配的那个单词的时间。
-            # 为了得到更准确的句子时间，可以扩展为句子匹配连续单词范围，但需要修改对齐算法。
-            # 这里保持简单，后续可改进。
             time_map[s_idx] = (start, end)
 
     # 生成字幕
