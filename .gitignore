@@ -13,3 +13,4 @@ processor.py
 cli.spec
 gui.spec
 output.lrc
+output.lrc.txt
