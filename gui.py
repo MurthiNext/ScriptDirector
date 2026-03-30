@@ -10,8 +10,41 @@ import customtkinter as ctk
 import logging
 import signal
 import psutil
+import json
+import time
+from logging.handlers import QueueHandler
 
-from director import direct_it
+from director import direct_it, logger as director_logger
+
+def load_advanced_config(config_path='config.ini'):
+    """读取 [advanced] 节的配置，返回字典，未设置的项使用默认值"""
+    config = configparser.ConfigParser()
+    defaults = {
+        'gap_penalty': '-10',
+        'similarity_offset': '50',
+        'default_duration': '5.0',
+        'max_combine': '5',
+        'beam_size': '5',
+        'vad_filter': 'False',
+        'vad_parameters': '{}',
+    }
+    if os.path.exists(config_path):
+        config.read(config_path, encoding='utf-8')
+        if config.has_section('advanced'):
+            for key, default in defaults.items():
+                if config.has_option('advanced', key):
+                    defaults[key] = config.get('advanced', key)
+    # 转换类型
+    advanced = {
+        'gap_penalty': int(defaults['gap_penalty']),
+        'similarity_offset': int(defaults['similarity_offset']),
+        'default_duration': float(defaults['default_duration']),
+        'max_combine': int(defaults['max_combine']),
+        'beam_size': int(defaults['beam_size']),
+        'vad_filter': defaults['vad_filter'].lower() in ('true', '1', 'yes'),
+        'vad_parameters': json.loads(defaults['vad_parameters']),
+    }
+    return advanced
 
 def read_config():
     config = configparser.ConfigParser()
@@ -28,6 +61,7 @@ def read_config():
 
 log_queue = multiprocessing.Queue()
 status_queue = queue.Queue()
+progress_queue = multiprocessing.Queue()   # 用于接收进度 (0-100 整数)
 
 def format_log_record(record):
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
@@ -73,6 +107,15 @@ def kill_process_tree(pid):
         pass
 
 def processing_thread(app):
+    # 为 director 的 logger 添加一个 QueueHandler，以便主进程的日志也能进入队列
+    # 但需要避免重复添加
+    for handler in director_logger.handlers:
+        if isinstance(handler, QueueHandler) and handler.queue == log_queue:
+            break
+    else:
+        queue_handler = QueueHandler(log_queue)
+        director_logger.addHandler(queue_handler)
+
     while True:
         try:
             msg = status_queue.get(timeout=0.5)
@@ -92,7 +135,8 @@ def processing_thread(app):
                         device=device,
                         compute_type=compute_type,
                         log_queue=log_queue,
-                        preprocess=prep
+                        preprocess=prep,
+                        progress_queue=progress_queue
                     )
                     status_queue.put(('success', output_path))
                 except Exception as e:
@@ -104,7 +148,7 @@ class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Script Director GUI")
-        self.geometry("800x700")
+        self.geometry("1400x700")
         self.resizable(False, False)
 
         ctk.set_appearance_mode("dark")
@@ -114,122 +158,143 @@ class App(ctk.CTk):
 
         # 读取配置文件默认值
         self.config_defaults = read_config()
+        # 读取高级配置并记录日志（打印到控制台）
+        self.advanced_config = load_advanced_config()
+        print(f"[Advanced] 当前高级参数配置: gap_penalty={self.advanced_config['gap_penalty']}, "
+              f"similarity_offset={self.advanced_config['similarity_offset']}, "
+              f"default_duration={self.advanced_config['default_duration']}, "
+              f"max_combine={self.advanced_config['max_combine']}, "
+              f"beam_size={self.advanced_config['beam_size']}, "
+              f"vad_filter={self.advanced_config['vad_filter']}, "
+              f"vad_parameters={self.advanced_config['vad_parameters']}")
 
-        # 主框架
-        self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        # 使用 grid 布局，明确控制左右比例
+        self.grid_columnconfigure(0, weight=0, minsize=500)   # 左列固定最小宽度 500
+        self.grid_columnconfigure(1, weight=1)                # 右列可扩展
+        self.grid_rowconfigure(0, weight=1)
 
-        # 配置网格列权重
-        self.main_frame.grid_columnconfigure(0, weight=0)
-        self.main_frame.grid_columnconfigure(1, weight=1)
-        self.main_frame.grid_columnconfigure(2, weight=0)
+        # 左侧框架
+        self.left_frame = ctk.CTkFrame(self)
+        self.left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        self.left_frame.grid_propagate(False)   # 不自动缩放
+        self.left_frame.configure(width=500)    # 明确宽度
+
+        # 右侧框架
+        self.right_frame = ctk.CTkFrame(self)
+        self.right_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.right_frame.grid_propagate(True)   # 允许扩展
+
+        # ---------- 左侧配置区域 ----------
+        # 使用网格布局，列权重设置
+        self.left_frame.grid_columnconfigure(0, weight=0)   # 标签列
+        self.left_frame.grid_columnconfigure(1, weight=1)   # 输入框列
+        self.left_frame.grid_columnconfigure(2, weight=0)   # 按钮列
 
         row = 0
 
         # 模型路径
-        self.model_label = ctk.CTkLabel(self.main_frame, text="模型路径：", anchor="e", width=100)
+        self.model_label = ctk.CTkLabel(self.left_frame, text="模型路径：", anchor="e", width=100)
         self.model_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.model_entry = ctk.CTkEntry(self.main_frame)
+        self.model_entry = ctk.CTkEntry(self.left_frame)
         self.model_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
-        self.model_btn = ctk.CTkButton(self.main_frame, text="浏览", width=80, command=self.browse_model)
+        self.model_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, command=self.browse_model)
         self.model_btn.grid(row=row, column=2, padx=5, pady=5)
-
         row += 1
 
         # 语言代码
-        self.lang_label = ctk.CTkLabel(self.main_frame, text="语言代码：", anchor="e", width=100)
+        self.lang_label = ctk.CTkLabel(self.left_frame, text="语言代码：", anchor="e", width=100)
         self.lang_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.lang_combo = ctk.CTkOptionMenu(self.main_frame, values=["ja", "zh", "en", "ko", "fr", "de", "ru", "es"])
+        self.lang_combo = ctk.CTkOptionMenu(self.left_frame, values=["ja", "zh", "en", "ko", "fr", "de", "ru", "es"])
         self.lang_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
         self.lang_combo.set("ja")
-
         row += 1
 
         # 设备类型
-        self.device_label = ctk.CTkLabel(self.main_frame, text="设备类型：", anchor="e", width=100)
+        self.device_label = ctk.CTkLabel(self.left_frame, text="设备类型：", anchor="e", width=100)
         self.device_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.device_combo = ctk.CTkOptionMenu(self.main_frame, values=["cuda", "cpu"])
+        self.device_combo = ctk.CTkOptionMenu(self.left_frame, values=["cuda", "cpu"])
         self.device_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
         self.device_combo.set("cuda")
-
         row += 1
 
         # 计算类型
-        self.compute_label = ctk.CTkLabel(self.main_frame, text="计算类型：", anchor="e", width=100)
+        self.compute_label = ctk.CTkLabel(self.left_frame, text="计算类型：", anchor="e", width=100)
         self.compute_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.compute_combo = ctk.CTkOptionMenu(self.main_frame, values=["float16", "int8_float16", "int8", "float32"])
+        self.compute_combo = ctk.CTkOptionMenu(self.left_frame, values=["float16", "int8_float16", "int8", "float32"])
         self.compute_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
         self.compute_combo.set("float16")
-
         row += 1
 
         # 分隔线
-        separator = ctk.CTkFrame(self.main_frame, height=2, fg_color="gray")
-        separator.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="ew")
+        separator1 = ctk.CTkFrame(self.left_frame, height=2, fg_color="gray")
+        separator1.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="ew")
         row += 1
 
         # 音频文件
-        self.audio_label = ctk.CTkLabel(self.main_frame, text="音频文件：", anchor="e", width=100)
+        self.audio_label = ctk.CTkLabel(self.left_frame, text="音频文件：", anchor="e", width=100)
         self.audio_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.audio_entry = ctk.CTkEntry(self.main_frame)
+        self.audio_entry = ctk.CTkEntry(self.left_frame)
         self.audio_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
-        self.audio_btn = ctk.CTkButton(self.main_frame, text="浏览", width=80, command=self.browse_audio)
+        self.audio_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, command=self.browse_audio)
         self.audio_btn.grid(row=row, column=2, padx=5, pady=5)
-
         row += 1
 
         # 台本文件
-        self.script_label = ctk.CTkLabel(self.main_frame, text="台本文件：", anchor="e", width=100)
+        self.script_label = ctk.CTkLabel(self.left_frame, text="台本文件：", anchor="e", width=100)
         self.script_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.script_entry = ctk.CTkEntry(self.main_frame)
+        self.script_entry = ctk.CTkEntry(self.left_frame)
         self.script_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
-        self.script_btn = ctk.CTkButton(self.main_frame, text="浏览", width=80, command=self.browse_script)
+        self.script_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, command=self.browse_script)
         self.script_btn.grid(row=row, column=2, padx=5, pady=5)
-
         row += 1
 
         # 输出名称
-        self.name_label = ctk.CTkLabel(self.main_frame, text="输出名称：", anchor="e", width=100)
+        self.name_label = ctk.CTkLabel(self.left_frame, text="输出名称：", anchor="e", width=100)
         self.name_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.name_entry = ctk.CTkEntry(self.main_frame)
+        self.name_entry = ctk.CTkEntry(self.left_frame)
         self.name_entry.grid(row=row, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
-
         row += 1
 
         # 输出格式
-        self.type_label = ctk.CTkLabel(self.main_frame, text="输出格式：", anchor="e", width=100)
+        self.type_label = ctk.CTkLabel(self.left_frame, text="输出格式：", anchor="e", width=100)
         self.type_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.type_menu = ctk.CTkOptionMenu(self.main_frame, values=["srt", "lrc"], width=120)
+        self.type_menu = ctk.CTkOptionMenu(self.left_frame, values=["srt", "lrc"], width=120)
         self.type_menu.grid(row=row, column=1, padx=5, pady=5, sticky="w")
         self.type_menu.set("srt")
-
         row += 1
 
         # 预处理选项
         self.preprocess_var = tk.BooleanVar()
         self.preprocess_check = ctk.CTkCheckBox(
-            self.main_frame,
+            self.left_frame,
             text="预处理台本（删除空行和方括号标识）",
             variable=self.preprocess_var
         )
         self.preprocess_check.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="w")
-
         row += 1
 
         # 开始按钮
-        self.start_btn = ctk.CTkButton(self.main_frame, text="开始处理", width=150, height=35, command=self.start_processing)
+        self.start_btn = ctk.CTkButton(self.left_frame, text="开始处理", width=150, height=35, command=self.start_processing)
         self.start_btn.grid(row=row, column=0, columnspan=3, padx=5, pady=10)
 
-        row += 1
+        # ---------- 右侧区域 ----------
+        # 进度条区域
+        self.progress_label = ctk.CTkLabel(self.right_frame, text="处理进度：", anchor="w")
+        self.progress_label.pack(pady=(5, 0), padx=10, anchor="w")
+
+        self.progress_bar = ctk.CTkProgressBar(self.right_frame)
+        self.progress_bar.pack(pady=5, padx=10, fill="x")
+        self.progress_bar.set(0)
+
+        self.progress_text = ctk.CTkLabel(self.right_frame, text="0%", anchor="w")
+        self.progress_text.pack(pady=(0, 10), padx=10, anchor="w")
 
         # 日志区域
-        self.log_label = ctk.CTkLabel(self.main_frame, text="运行日志：", anchor="w")
-        self.log_label.grid(row=row, column=0, columnspan=3, padx=5, pady=5, sticky="w")
-        row += 1
+        self.log_label = ctk.CTkLabel(self.right_frame, text="运行日志：", anchor="w")
+        self.log_label.pack(pady=(10, 0), padx=10, anchor="w")
 
-        self.log_text = ctk.CTkTextbox(self.main_frame, height=280, wrap="word")
-        self.log_text.grid(row=row, column=0, columnspan=3, padx=5, pady=5, sticky="nsew")
-        self.main_frame.grid_rowconfigure(row, weight=1)
+        self.log_text = ctk.CTkTextbox(self.right_frame, wrap="word")
+        self.log_text.pack(pady=5, padx=10, fill="both", expand=True)
 
         # 从配置文件填充默认值
         if self.config_defaults:
@@ -295,6 +360,30 @@ class App(ctk.CTk):
             return
 
         self.log_text.delete("1.0", "end")
+        self.progress_bar.set(0)
+        self.progress_text.configure(text="0%")
+
+        # 打印配置信息到日志
+        self.append_log("========== 当前配置 ==========")
+        self.append_log(f"[Common] 模型路径: {model_path}")
+        self.append_log(f"[Common] 语言代码: {language}")
+        self.append_log(f"[Common] 设备类型: {device}")
+        self.append_log(f"[Common] 计算类型: {compute_type}")
+
+        # 读取 advanced 配置并打印
+        try:
+            advanced = load_advanced_config()
+            self.append_log("[Advanced] gap_penalty: {}".format(advanced['gap_penalty']))
+            self.append_log("[Advanced] similarity_offset: {}".format(advanced['similarity_offset']))
+            self.append_log("[Advanced] default_duration: {}".format(advanced['default_duration']))
+            self.append_log("[Advanced] max_combine: {}".format(advanced['max_combine']))
+            self.append_log("[Advanced] beam_size: {}".format(advanced['beam_size']))
+            self.append_log("[Advanced] vad_filter: {}".format(advanced['vad_filter']))
+            self.append_log("[Advanced] vad_parameters: {}".format(advanced['vad_parameters']))
+        except Exception as e:
+            self.append_log(f"警告：读取 advanced 配置失败 - {e}")
+        self.append_log("=============================")
+
         self.is_processing = True
         status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type))
 
@@ -303,6 +392,7 @@ class App(ctk.CTk):
         self.log_text.see("end")
 
     def check_queues(self):
+        # 处理日志队列
         try:
             while True:
                 item = log_queue.get_nowait()
@@ -313,11 +403,26 @@ class App(ctk.CTk):
                 self.append_log(msg)
         except queue.Empty:
             pass
+
+        # 处理进度队列
+        try:
+            while True:
+                progress = progress_queue.get_nowait()
+                self.progress_bar.set(progress / 100.0)
+                self.progress_text.configure(text=f"{progress}%")
+                if progress == 100:
+                    self.is_processing = False
+        except queue.Empty:
+            pass
+
+        # 处理状态队列
         try:
             msg = status_queue.get_nowait()
             if msg[0] == 'success':
                 self.is_processing = False
                 self.append_log(f"成功生成字幕：{msg[1]}")
+                self.progress_bar.set(1.0)
+                self.progress_text.configure(text="100%")
                 messagebox.showinfo("完成", f"字幕已生成：{msg[1]}")
             elif msg[0] == 'error':
                 self.is_processing = False
@@ -325,6 +430,7 @@ class App(ctk.CTk):
                 messagebox.showerror("错误", f"处理失败：{msg[1]}")
         except queue.Empty:
             pass
+
         self.after(100, self.check_queues)
 
     def on_closing(self):

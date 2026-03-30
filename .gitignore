@@ -2,6 +2,7 @@ __pycache__
 .venv
 build
 dist
+misc
 faster-whisper-large-v3
 faster-whisper-large-v3-turbo
 audio.wav
@@ -10,5 +11,5 @@ script.txt
 director_xxl.py
 processor.py
 cli.spec
-app.spec
+gui.spec
 output.lrc

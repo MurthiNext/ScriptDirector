@@ -92,6 +92,11 @@ def init_config() -> None:
     gap_penalty = ask_input('gap_penalty (对齐惩罚值，默认 -10): ').strip()
     similarity_offset = ask_input('similarity_offset (相似度偏移，默认 50): ').strip()
     default_duration = ask_input('default_duration (默认字幕时长/秒，默认 5.0): ').strip()
+    max_combine = ask_input('max_combine (最大合并片段数，默认 5): ').strip()
+    beam_size = ask_input('beam_size (束搜索宽度，默认 5): ').strip()
+    vad_filter = ask_input('vad_filter (启用语音活动检测，默认 False): ').strip()
+    vad_parameters = ask_input('vad_parameters (VAD参数 JSON，默认 {}): ').strip()
+
     conf['advanced'] = {}
     if gap_penalty:
         conf['advanced']['gap_penalty'] = gap_penalty
@@ -99,6 +104,14 @@ def init_config() -> None:
         conf['advanced']['similarity_offset'] = similarity_offset
     if default_duration:
         conf['advanced']['default_duration'] = default_duration
+    if max_combine:
+        conf['advanced']['max_combine'] = max_combine
+    if beam_size:
+        conf['advanced']['beam_size'] = beam_size
+    if vad_filter:
+        conf['advanced']['vad_filter'] = vad_filter.lower() in ('true', '1', 'yes')
+    if vad_parameters:
+        conf['advanced']['vad_parameters'] = vad_parameters
 
     with open('config.ini', 'w', encoding='utf-8') as configfile:
         conf.write(configfile)
@@ -134,9 +147,8 @@ def modify_config(key_value: str) -> None:
     conf.read('config.ini', encoding='utf-8')
 
     # 判断属于哪个节（默认 common）
-    section = 'common'
-    if key in ['gap_penalty', 'similarity_offset', 'default_duration']:
-        section = 'advanced'
+    advanced_keys = ['gap_penalty', 'similarity_offset', 'default_duration', 'max_combine', 'beam_size', 'vad_filter', 'vad_parameters']
+    section = 'advanced' if key in advanced_keys else 'common'
     if section not in conf:
         conf[section] = {}
     conf[section][key] = value
