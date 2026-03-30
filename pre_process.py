@@ -47,7 +47,6 @@ def preprocess_file(input_path: str, output_path: Optional[str] = None) -> str:
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(cleaned)
-            f.close()
     return cleaned
 
 if __name__ == '__main__':
