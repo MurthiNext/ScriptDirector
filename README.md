@@ -25,7 +25,7 @@
 - AMD ROCm 7.2.1 （若使用AMD显卡加速，必须使用此版本）
 - 第三方Python库：`stable-ts`, `shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
 
-### 安装步骤
+### 在Windows10及以上的系统安装
 1. 克隆或下载本项目。
 2. 按照特定方法安装依赖：
    ```bash
@@ -41,6 +41,32 @@
    pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
    ```
 3. 下载 Faster Whisper 模型并解压到本地目录。
+
+### 在Linux上安装（Ubuntu 24.04）
+1. 克隆或下载本项目。
+2. 按照特定方法安装依赖：
+   ```bash
+   pip3 install -r requirements.txt # 安装所有需要的依赖项
+   pip3 uninstall torch torchvision triton torchaudio -y # 卸载为CUDA准备的PyTorch
+   # 获取PyTorch for ROCm 7.2.1
+   wget https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1.lw.gitff65f5bc-cp312-cp312-linux_x86_64.whl
+   wget https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torchvision-0.24.0%2Brocm7.2.1.gitb919bd0c-cp312-cp312-linux_x86_64.whl
+   wget https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/triton-3.5.1%2Brocm7.2.1.gita272dfa8-cp312-cp312-linux_x86_64.whl
+   wget https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torchaudio-2.9.0%2Brocm7.2.1.gite3c6ee2b-cp312-cp312-linux_x86_64.whl
+   # 安装PyTorch for ROCm 7.2.1
+   pip3 install torch-2.9.1+rocm7.2.1.lw.gitff65f5bc-cp312-cp312-linux_x86_64.whl torchvision-0.24.0+rocm7.2.1.gitb919bd0c-cp312-cp312-linux_x86_64.whl torchaudio-2.9.0+rocm7.2.1.gite3c6ee2b-cp312-cp312-linux_x86_64.whl triton-3.5.1+rocm7.2.1.gita272dfa8-cp312-cp312-linux_x86_64.whl
+   ```
+   理论上讲，Linux也可直接使用如下方法安装：
+   ```bash
+   pip3 install -r requirements.txt # 安装所有需要的依赖项
+   pip3 uninstall torch torchvision triton torchaudio -y # 卸载为CUDA准备的PyTorch
+   pip3 install torch torchvision triton torchaudio --index-url https://download.pytorch.org/whl/rocm7.2 # 安装特定版本的PyTorch
+   ```
+   方法一是由AMD官方给出的，方法二是由PyTorch官方给出的。
+3. 下载 Faster Whisper 模型并解压到本地目录。
+
+* 你可以在[这里](https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/index.html)找到AMD官方给出的技术指导，也许它会帮助你在Windows上使用ROCm部署此程序。
+* 如果你是Linux用户，流程则可稍微简化一些。
 
 #### 以下列出主流Faster Whisper模型的下载地址。
 * 快上加快
@@ -161,6 +187,7 @@ python gui.py
 [common]
 model = D:/models/faster-whisper-large-v3
 lang = ja
+# AMD显卡同样设置device=cuda
 device = cuda
 compute = float16
 ```
