@@ -62,7 +62,7 @@ python cli.py init
 按照提示输入：
 - **Faster Whisper 本地模型路径**：模型文件夹的路径（如 `./faster-whisper-large-v3`）
 - **台本与音频所使用的语言代码**：例如 `ja`（日语）、`zh`（中文）、`en`（英文）
-- **设备类型**：`cuda` 或 `cpu`
+- **设备类型**：`cuda` 或 `cpu`（AMD显卡加速同样填写cuda）
 - **计算类型**：`float16`（GPU）、`int8`（CPU）等
 
 **高级参数（可选）**：在初始化过程中，还可以设置以下高级参数（直接回车跳过则使用默认值）：
@@ -155,7 +155,7 @@ compute = float16
 ```
 - `model`：Faster Whisper 模型文件夹路径
 - `lang`：语言代码（支持 `ja`, `zh`, `en`, `ko`, `fr`, `de` 等）
-- `device`：计算设备 `cuda` 或 `cpu`
+- `device`：计算设备 `cuda` 或 `cpu`（AMD显卡加速同样填写cuda）
 - `compute`：计算精度，常用 `float16`（GPU）或 `int8`（CPU）
 
 ### `[advanced]` 节（可选）
