@@ -1,6 +1,7 @@
 __pycache__
-.venv
 build
+cuda-venv
+rocm-venv
 dist
 misc
 faster-whisper-large-v3

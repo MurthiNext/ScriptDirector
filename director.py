@@ -121,7 +121,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     n, m = len(script_sents), len(whisper_sents)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
 
-    logger.info(f"开始对齐：台本 {n} 句，Whisper {m} 句")
+    logger.info(f"开始对齐：台本 {n} 句，当前字幕 {m} 句")
 
     # 初始化边界
     for i in range(1, n + 1):
@@ -177,6 +177,12 @@ def _transcribe_unified(model, audio_path: str, language: str,
                         progress_queue: Optional[multiprocessing.Queue]) -> Tuple[List[Tuple[str, float, float]], float]:
     """统一转录：返回单词列表（word, start, end）和总时长，同时发送进度"""
     logger.info("开始转录音频...")
+    # 定义内部进度回调
+    def progress_cb(p, eta):
+        if progress_queue is not None and eta > 0:
+            # p 是已处理的时长（秒），eta 是总时长（秒）
+            progress = int((p / eta) * 95)  # 识别阶段占 0-95%
+            progress_queue.put(progress)
     result = model.transcribe(
         audio_path,
         language=language,
@@ -184,7 +190,7 @@ def _transcribe_unified(model, audio_path: str, language: str,
         beam_size=beam_size,
         vad_filter=vad_filter,
         vad_parameters=vad_parameters if vad_filter else None,
-        progress_callback=lambda p, eta: progress_queue.put(int(p * 95)) if progress_queue else None
+        progress_callback=progress_cb
     )
     total_duration = result.ori_dict.get('duration')
     # 收集所有单词
@@ -197,7 +203,7 @@ def _transcribe_unified(model, audio_path: str, language: str,
         total_duration = all_words[-1][2]
     logger.info(f"识别完成，共 {len(all_words)} 个单词")
     if progress_queue is not None:
-        progress_queue.put(95)
+        progress_queue.put(95)  # 识别阶段完成，进入对齐阶段
     return all_words, total_duration
 
 def _prepare_script(script_path: str, preprocess: bool, short_sentences: bool) -> Tuple[str, List[str]]:
@@ -219,7 +225,10 @@ def _prepare_script(script_path: str, preprocess: bool, short_sentences: bool) -
 def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[str, float, float]],
                                 gap_penalty: int, similarity_offset: int, default_duration: float,
                                 progress_queue: Optional[multiprocessing.Queue]) -> List[Tuple[str, float, float]]:
-    """将台本句子与单词列表对齐，为每个句子分配时间戳"""
+    """
+    将台本句子与单词列表对齐，为每个句子分配时间戳。
+    由原来的map_timestamps函数改进而来，现在直接使用单词级时间戳进行对齐，插值逻辑也相应调整。
+    """
     # 提取单词文本列表
     word_texts = [w[0] for w in all_words]
     # 对齐台本句子和单词序列
