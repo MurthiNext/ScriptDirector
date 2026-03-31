@@ -13,8 +13,8 @@ import json
 import re
 
 __author__ = 'MurthiNext'
-__version__ = '1.9.9 Alpha'
-__date__ = '2026/03/30'
+__version__ = '1.9.9 Beta'
+__date__ = '2026/03/31'
 
 if os.path.isfile('log.log'):
     with open('log.log', 'w', encoding='utf-8') as wf:
@@ -121,7 +121,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     n, m = len(script_sents), len(whisper_sents)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
 
-    logger.info(f"开始对齐：台本 {n} 句，Whisper {m} 句")
+    logger.info(f"开始对齐：台本 {n} 句，当前字幕 {m} 句")
 
     # 初始化边界
     for i in range(1, n + 1):
@@ -172,11 +172,41 @@ def is_punctuation_only(text: str) -> bool:
             return False
     return True
 
+def log_alignment_mapping(script_sents: List[str], target_sents: List[str], alignment: List[Tuple[Optional[int], Optional[int]]], name_a: str = "完整句子", name_b: str = "散落的单词") -> None:
+    """
+    记录对齐映射关系，格式：
+      完整句子 [台本编号] ↔ 单词索引 [索引列表] : 台本句子内容
+          散落的单词: [索引] 单词文本, [索引] 单词文本, ...
+    """
+    # 建立 script_idx -> 对应的 target_idx 列表
+    script_to_target = {}
+    for s_idx, t_idx in alignment:
+        if s_idx is not None and t_idx is not None:
+            script_to_target.setdefault(s_idx, []).append(t_idx)
+
+    logger.info(f"========== 对齐映射（{name_a} ↔ {name_b}） ==========")
+    for s_idx in sorted(script_to_target.keys()):
+        t_indices = sorted(script_to_target[s_idx])
+        idx_str = ", ".join(str(i) for i in t_indices)
+        sent_preview = script_sents[s_idx][:80] + "..." if len(script_sents[s_idx]) > 80 else script_sents[s_idx]
+        logger.info(f"  {name_a} [{s_idx}] ↔ 单词索引 [{idx_str}] : {sent_preview}")
+        words_detail = []
+        for t_idx in t_indices:
+            word_text = target_sents[t_idx][:50] + "..." if len(target_sents[t_idx]) > 50 else target_sents[t_idx]
+            words_detail.append(f"[{t_idx}] {word_text}")
+        logger.info(f"      {name_b}: {', '.join(words_detail)}")
+    logger.info("=" * 50)
+
 def _transcribe_unified(model, audio_path: str, language: str,
                         beam_size: int, vad_filter: bool, vad_parameters: dict,
                         progress_queue: Optional[multiprocessing.Queue]) -> Tuple[List[Tuple[str, float, float]], float]:
-    """统一转录：返回单词列表（word, start, end）和总时长，同时发送进度"""
+    """统一转录：返回单词列表（word, start, end）和总时长，同时发送进度，并实时记录识别片段"""
     logger.info("开始转录音频...")
+    # 定义内部进度回调
+    def progress_cb(p, eta):
+        if progress_queue is not None and eta > 0:
+            progress = int((p / eta) * 95)
+            progress_queue.put(progress)
     result = model.transcribe(
         audio_path,
         language=language,
@@ -184,7 +214,7 @@ def _transcribe_unified(model, audio_path: str, language: str,
         beam_size=beam_size,
         vad_filter=vad_filter,
         vad_parameters=vad_parameters if vad_filter else None,
-        progress_callback=lambda p, eta: progress_queue.put(int(p * 95)) if progress_queue else None
+        progress_callback=progress_cb
     )
     total_duration = result.ori_dict.get('duration')
     # 收集所有单词
@@ -219,11 +249,15 @@ def _prepare_script(script_path: str, preprocess: bool, short_sentences: bool) -
 def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[str, float, float]],
                                 gap_penalty: int, similarity_offset: int, default_duration: float,
                                 progress_queue: Optional[multiprocessing.Queue]) -> List[Tuple[str, float, float]]:
-    """将台本句子与单词列表对齐，为每个句子分配时间戳"""
+    """
+    将台本句子与单词列表对齐，为每个句子分配时间戳。
+    由原来的map_timestamps函数改进而来，现在直接使用单词级时间戳进行对齐，插值逻辑也相应调整。
+    """
     # 提取单词文本列表
     word_texts = [w[0] for w in all_words]
     # 对齐台本句子和单词序列
     alignment = align_sentence_lists(script_sents, word_texts, gap_penalty, similarity_offset)
+    log_alignment_mapping(script_sents, word_texts, alignment, "台本", "单词")
     # 构建时间映射
     time_map = {}
     for s_idx, w_idx in alignment:
@@ -379,7 +413,7 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
             p.terminate()
             p.join()
         raise RuntimeError(f"获取结果失败: {e}")
-    
+
     subtitles = [r for r in result if r if r[0]]
 
     p.join(timeout=10)
@@ -405,5 +439,5 @@ if __name__ == "__main__":
         language='ja',                           # 语言代码
         device='cuda',                           # 计算设备 'cuda' 或 'cpu'
         compute_type='float16',                   # 计算类型
-        short_sentences=True                    # 启用短句模式
+        short_sentences=False                    # 启用短句模式
     )

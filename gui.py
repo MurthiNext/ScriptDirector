@@ -14,7 +14,8 @@ import json
 import time
 from logging.handlers import QueueHandler
 
-from director import direct_it, logger as director_logger
+from director import direct_it, logger as director_logger, load_advanced_config
+from only_align import align_only
 
 def load_advanced_config(config_path='config.ini'):
     """读取 [advanced] 节的配置，返回字典，未设置的项使用默认值"""
@@ -82,6 +83,12 @@ def open_file_dialog(file_type, initialdir=''):
             initialdir=initialdir,
             filetypes=[("文本文件", "*.txt")]
         )
+    elif file_type == 'subtitle':
+        path = filedialog.askopenfilename(
+            title="选择已有字幕文件",
+            initialdir=initialdir,
+            filetypes=[("字幕文件", "*.srt *.lrc")]
+        )
     elif file_type == 'model':
         path = filedialog.askdirectory(
             title="选择模型文件夹",
@@ -120,27 +127,51 @@ def processing_thread(app):
         try:
             msg = status_queue.get(timeout=0.5)
             if msg[0] == 'start':
-                # 解包消息，增加 short_sentences 参数
-                (_, audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences) = msg
-                try:
-                    audio_dir = os.path.dirname(audio) or '.'
-                    base = name if name else os.path.splitext(os.path.basename(audio))[0]
-                    output_path = os.path.join(audio_dir, f"{base}.{fmt}")
+                # 根据消息长度判断模式：长度为 11 是听写模式，长度为 12 是只对齐模式
+                if len(msg) == 11:  # 听写模式
+                    (_, audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences) = msg
+                    subtitle_path = None
+                else:  # 只对齐模式（长度为12）
+                    (_, audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences, subtitle_path) = msg
 
-                    direct_it(
-                        audio_path=audio,
-                        script_path=script,
-                        output_path=output_path,
-                        local_model_path=model_path,
-                        language=language,
-                        device=device,
-                        compute_type=compute_type,
-                        log_queue=log_queue,
-                        preprocess=prep,
-                        progress_queue=progress_queue,
-                        short_sentences=short_sentences   # 新增
-                    )
-                    status_queue.put(('success', output_path))
+                try:
+                    if subtitle_path:
+                        # 只对齐模式
+                        # 确定输出路径
+                        audio_dir = os.path.dirname(subtitle_path) or '.'
+                        base = name if name else os.path.splitext(os.path.basename(subtitle_path))[0]
+                        output_path = os.path.join(audio_dir, f"{base}.{fmt}")
+                        # 调用 only_align.align_only
+                        align_only(
+                            script_path=script,
+                            subtitle_path=subtitle_path,
+                            output_path=output_path,
+                            output_format=fmt,
+                            preprocess=prep,
+                            short_sentences=short_sentences,
+                            config_path='config.ini'
+                        )
+                        status_queue.put(('success', output_path))
+                    else:
+                        # 听写模式（原有逻辑）
+                        audio_dir = os.path.dirname(audio) or '.'
+                        base = name if name else os.path.splitext(os.path.basename(audio))[0]
+                        output_path = os.path.join(audio_dir, f"{base}.{fmt}")
+
+                        direct_it(
+                            audio_path=audio,
+                            script_path=script,
+                            output_path=output_path,
+                            local_model_path=model_path,
+                            language=language,
+                            device=device,
+                            compute_type=compute_type,
+                            log_queue=log_queue,
+                            preprocess=prep,
+                            progress_queue=progress_queue,
+                            short_sentences=short_sentences
+                        )
+                        status_queue.put(('success', output_path))
                 except Exception as e:
                     status_queue.put(('error', str(e)))
         except queue.Empty:
@@ -250,6 +281,15 @@ class App(ctk.CTk):
         self.script_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
+        # 字幕文件（新增）
+        self.subtitle_label = ctk.CTkLabel(self.left_frame, text="[可选]已有字幕：", anchor="e", width=100)
+        self.subtitle_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        self.subtitle_entry = ctk.CTkEntry(self.left_frame)
+        self.subtitle_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
+        self.subtitle_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, command=self.browse_subtitle)
+        self.subtitle_btn.grid(row=row, column=2, padx=5, pady=5)
+        row += 1
+
         # 输出名称
         self.name_label = ctk.CTkLabel(self.left_frame, text="输出名称：", anchor="e", width=100)
         self.name_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
@@ -283,8 +323,11 @@ class App(ctk.CTk):
             variable=self.short_sentences_var
         )
         self.short_sentences_check.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="w")
-        row += 1
+        # 绑定事件：当字幕文件变化时，动态启用/禁用短句模式复选框
+        self.subtitle_entry.bind("<KeyRelease>", self.on_subtitle_change)
+        self.on_subtitle_change()  # 初始状态
 
+        row += 1
         # 开始按钮
         self.start_btn = ctk.CTkButton(self.left_frame, text="开始处理", width=150, height=35, command=self.start_processing)
         self.start_btn.grid(row=row, column=0, columnspan=3, padx=5, pady=10)
@@ -329,6 +372,20 @@ class App(ctk.CTk):
         # 绑定关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
+    def on_subtitle_change(self, event=None):
+        """当字幕文件输入框内容变化时，调整短句模式复选框的可用性"""
+        if self.subtitle_entry.get().strip():
+            # 有字幕文件，禁用短句模式复选框并添加提示
+            self.short_sentences_check.configure(state="disabled")
+            # 如果之前是选中状态，取消选中并提示
+            if self.short_sentences_var.get():
+                self.short_sentences_var.set(False)
+                # 可以在日志区域显示提示（可选）
+                # self.append_log("注意：只对齐模式下短句模式无效，已自动禁用。")
+        else:
+            # 无字幕文件，恢复短句模式复选框
+            self.short_sentences_check.configure(state="normal")
+
     def browse_audio(self):
         initial_dir = os.path.dirname(self.audio_entry.get()) if self.audio_entry.get() else ''
         path = open_file_dialog('audio', initial_dir)
@@ -343,6 +400,15 @@ class App(ctk.CTk):
             self.script_entry.delete(0, "end")
             self.script_entry.insert(0, path)
 
+    def browse_subtitle(self):
+        initial_dir = os.path.dirname(self.subtitle_entry.get()) if self.subtitle_entry.get() else ''
+        path = open_file_dialog('subtitle', initial_dir)
+        if path:
+            self.subtitle_entry.delete(0, "end")
+            self.subtitle_entry.insert(0, path)
+            # 触发状态更新
+            self.on_subtitle_change()
+
     def browse_model(self):
         initial_dir = self.model_entry.get() if self.model_entry.get() else ''
         path = open_file_dialog('model', initial_dir)
@@ -353,6 +419,7 @@ class App(ctk.CTk):
     def start_processing(self):
         audio = self.audio_entry.get()
         script = self.script_entry.get()
+        subtitle = self.subtitle_entry.get()
         name = self.name_entry.get()
         fmt = self.type_menu.get()
         prep = self.preprocess_var.get()
@@ -360,17 +427,25 @@ class App(ctk.CTk):
         language = self.lang_combo.get()
         device = self.device_combo.get()
         compute_type = self.compute_combo.get()
-        short_sentences = self.short_sentences_var.get()   # 获取短句模式标志
+        short_sentences = self.short_sentences_var.get()
 
-        if not audio or not script:
-            self.append_log("错误：请填写音频文件和台本文件路径")
+        if not script:
+            self.append_log("错误：请填写台本文件路径")
             return
-        if not model_path:
-            self.append_log("错误：请填写模型路径")
+        if not subtitle and not audio:
+            self.append_log("错误：请填写音频文件或已有字幕文件")
             return
-        if not language:
+        if not subtitle and not model_path:
+            self.append_log("错误：请填写模型路径（听写模式需要模型）")
+            return
+        if not subtitle and not language:
             self.append_log("错误：请选择语言代码")
             return
+
+        # 如果只对齐模式且启用了短句模式，在日志中警告
+        if subtitle and short_sentences:
+            self.append_log("警告：只对齐模式下短句模式无效，将自动禁用短句模式。")
+            short_sentences = False
 
         self.log_text.delete("1.0", "end")
         self.progress_bar.set(0)
@@ -378,27 +453,29 @@ class App(ctk.CTk):
 
         # 打印配置信息到日志
         self.append_log("========== 当前配置 ==========")
-        self.append_log(f"[Common] 模型路径: {model_path}")
-        self.append_log(f"[Common] 语言代码: {language}")
-        self.append_log(f"[Common] 设备类型: {device}")
-        self.append_log(f"[Common] 计算类型: {compute_type}")
-
-        # 读取 advanced 配置并打印
-        try:
-            advanced = load_advanced_config()
-            self.append_log("[Advanced] gap_penalty: {}".format(advanced['gap_penalty']))
-            self.append_log("[Advanced] similarity_offset: {}".format(advanced['similarity_offset']))
-            self.append_log("[Advanced] default_duration: {}".format(advanced['default_duration']))
-            self.append_log("[Advanced] max_combine: {}".format(advanced['max_combine']))
-            self.append_log("[Advanced] beam_size: {}".format(advanced['beam_size']))
-            self.append_log("[Advanced] vad_filter: {}".format(advanced['vad_filter']))
-            self.append_log("[Advanced] vad_parameters: {}".format(advanced['vad_parameters']))
-        except Exception as e:
-            self.append_log(f"警告：读取 advanced 配置失败 - {e}")
+        self.append_log(f"[Common] 模型路径: {model_path if not subtitle else '(只对齐模式，无需模型)'}")
+        self.append_log(f"[Common] 语言代码: {language if not subtitle else '(只对齐模式，无需语言)'}")
+        self.append_log(f"[Common] 设备类型: {device if not subtitle else '(只对齐模式，无需设备)'}")
+        self.append_log(f"[Common] 计算类型: {compute_type if not subtitle else '(只对齐模式，无需计算类型)'}")
+        self.append_log(f"台本文件: {script}")
+        if subtitle:
+            self.append_log(f"已有字幕文件: {subtitle} (只对齐模式)")
+        else:
+            self.append_log(f"音频文件: {audio}")
+        self.append_log(f"输出名称: {name if name else '(自动生成)'}")
+        self.append_log(f"输出格式: {fmt}")
+        self.append_log(f"预处理台本: {prep}")
+        self.append_log(f"短句模式: {short_sentences}")
         self.append_log("=============================")
 
         self.is_processing = True
-        status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences))
+        # 根据是否有字幕文件决定消息格式
+        if subtitle:
+            # 只对齐模式：传递字幕文件路径
+            status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences, subtitle))
+        else:
+            # 听写模式
+            status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences))
 
     def append_log(self, msg):
         self.log_text.insert("end", msg + "\n")

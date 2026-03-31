@@ -4,7 +4,8 @@ import os
 import sys
 import mimetypes
 from typing import Optional
-from director import direct_it
+from director import direct_it, load_advanced_config
+from only_align import align_only  # 新增导入
 
 ask_input = input
 
@@ -174,13 +175,17 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     \b
     INPUT_STR 必须包含两个文件路径，用英文逗号分隔，例如：
         python cli.py process "audio.wav,script.txt"
+        或
+        python cli.py process "script.txt,subtitles.srt"
 
     \b
-    程序会自动区分音频文件和台本文件：
+    程序会自动识别文件类型：
     - 扩展名为 .txt 的视为台本文件
+    - 扩展名为 .srt 或 .lrc 的视为已有字幕文件（启用只对齐模式）
     - 其他扩展名或 MIME 类型为 audio/ 的视为音频文件
 
     生成的字幕文件与音频文件同名，扩展名为 .srt 或 .lrc，保存在同一目录。
+    如果输入的是字幕文件（只对齐模式），则输出文件默认与字幕文件同名。
 
     运行此命令前必须通过 init 命令创建配置文件 config.ini。
 
@@ -191,19 +196,24 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     - 去除多余空格
 
     如果指定 -s 或 --shorter，则启用短句模式，按标点分割长句，生成更精确的字幕。
+    注意：只对齐模式下短句模式无效，程序会发出警告并忽略该选项。
     """
     files = [f.strip() for f in input_str.split(',')]
     if len(files) != 2:
         raise click.UsageError('输入参数必须包含两个文件路径，用逗号分隔。')
 
-    audio_path = None
+    # 识别文件类型
     script_path = None
+    audio_path = None
+    subtitle_path = None
     for f in files:
         if not os.path.isfile(f):
             raise click.FileError(f, f'文件不存在：{f}')
         ext = os.path.splitext(f)[1].lower()
         if ext == '.txt':
             script_path = f
+        elif ext in ('.srt', '.lrc'):
+            subtitle_path = f
         else:
             mime_type, _ = mimetypes.guess_type(f)
             if mime_type and mime_type.startswith('audio/'):
@@ -211,9 +221,39 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
             else:
                 audio_path = f
 
-    if not script_path or not audio_path:
-        raise click.UsageError('无法识别音频文件和台本文件，请确保文件扩展名正确。')
+    if not script_path:
+        raise click.UsageError('未找到台本文件（.txt）')
 
+    # 只对齐模式：提供了字幕文件
+    if subtitle_path:
+        click.echo("检测到已有字幕文件，启用只对齐模式（不进行语音识别）")
+        # 如果用户指定了短句模式，发出警告
+        if shorter:
+            click.echo("警告：只对齐模式下短句模式无效，将忽略 -s/--shorter 选项。")
+        # 确定输出路径
+        output_dir = os.path.dirname(subtitle_path) or '.'
+        if name:
+            base = name
+        else:
+            base = os.path.splitext(os.path.basename(subtitle_path))[0]
+        output_path = os.path.join(output_dir, f"{base}.{type}")
+        # 调用 only_align.align_only
+        align_only(
+            script_path=script_path,
+            subtitle_path=subtitle_path,
+            output_path=output_path,
+            output_format=type,
+            preprocess=preprocess,
+            short_sentences=shorter,   # 传入但函数内部会忽略
+            config_path='config.ini'
+        )
+        click.echo(f'字幕已生成：{output_path}')
+        return
+
+    # 否则走原有流程（音频+台本）
+    if not audio_path:
+        raise click.UsageError('未找到音频文件或已有字幕文件')
+    
     if not os.path.exists('config.ini'):
         raise click.ClickException('配置文件不存在，请先运行 init 命令。')
 
