@@ -6,7 +6,7 @@ import multiprocessing
 
 # 导入 director 中的相关函数和模块
 from director import (
-    logger, split_sentences_pysbd,
+    logger, split_sentences_pysbd, log_alignment_mapping,
     align_sentence_lists, save_srt, save_lrc,
     load_advanced_config
 )
@@ -213,6 +213,7 @@ def align_only(script_path: str, subtitle_path: str, output_path: str,
 
     # 对齐
     alignment = align_sentence_lists(script_sents, whisper_texts, gap_penalty, similarity_offset)
+    log_alignment_mapping(script_sents, whisper_texts, alignment, "台本", "已有字幕")
     subtitles = map_timestamps(alignment, script_sents, whisper_segments, default_duration, max_combine)
 
     # 保存结果
