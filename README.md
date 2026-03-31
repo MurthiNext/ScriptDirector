@@ -2,7 +2,7 @@
 <div align=center><img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector"/></div>
 
 ### &emsp;&emsp;这里是Script Director的ROCm-Version分支！即**AMD特供版**，通过使用ROCm强兼CUDA实现在AMD显卡上的硬件加速！由于MurthiNext没有高性能的AMD显卡用于测试，因此这个版本可能会出现各种问题，如果你执意要使用AMD显卡加速，请尝试自行修改代码并编译。
-### &emsp;&emsp;此分支基于BETA-DEV，不与正式版同步更新。
+### &emsp;&emsp;此分支基于BETA-DEV，不与正式版同步更新。请确保你有足够的知识储备来解决AMD留下来的兼容性问题（因为这东西实在麻烦……）同时，**务必仔细阅读该README的所有内容**，我已为其专门设计了AMD版本的文档。
 ### &emsp;&emsp;Script Director 是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕（SRT/LRC）的工具。它利用 **Faster Whisper** 进行语音识别，并通过 **Needleman-Wunsch** 风格的动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
 
 ## 特性
@@ -20,15 +20,24 @@
 ## 安装
 
 ### 依赖
-- Python 3.8+
-- AMD ROCm 7.2 （若使用AMD显卡加速）
+- Python 3.12.10 （必须使用此版本）
+- AMD ROCm 7.2.1 （若使用AMD显卡加速，必须使用此版本）
 - 第三方Python库：`stable-ts`, `shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
 
 ### 安装步骤
 1. 克隆或下载本项目。
-2. 安装依赖：
+2. 按照特定方法安装依赖：
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements.txt # 安装所有需要的依赖项
+   pip uninstall torch torchvision torchaudio -y # 卸载为CUDA准备的PyTorch
+   # 安装ROCm SDK
+   pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl
+   pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl
+   pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl
+   # 安装PyTorch for ROCm 7.2.1
+   pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
+   pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
+   pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
    ```
 3. 下载 Faster Whisper 模型并解压到本地目录。
 
@@ -63,7 +72,7 @@ python cli.py init
 按照提示输入：
 - **Faster Whisper 本地模型路径**：模型文件夹的路径（如 `./faster-whisper-large-v3`）
 - **台本与音频所使用的语言代码**：例如 `ja`（日语）、`zh`（中文）、`en`（英文）
-- **设备类型**：`cuda` 或 `cpu`
+- **设备类型**：`cuda` 或 `cpu`（注意：若使用AMD显卡，此处应填写cuda，由rocm强行兼容）
 - **计算类型**：`float16`（GPU）、`int8`（CPU）等
 
 **高级参数（可选）**：在初始化过程中，还可以设置以下高级参数（直接回车跳过则使用默认值）：
