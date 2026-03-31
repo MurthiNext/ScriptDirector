@@ -6,8 +6,9 @@
 
 ## 特性
 
-- 🎙️ 基于 Faster Whisper 的高质量语音识别
+- 🎙️ 基于 Faster Whisper 的高质量语音识别（通过 stable-whisper 封装，支持单词级时间戳）
 - 📄 支持日语（`ja`）、中文（`zh`）、英文（`en`）等多语言台本分割（使用 `pysbd`）
+- ✨ 短句模式：利用单词级时间戳，自动按标点分割长句，生成更精确的字幕
 - 🔗 智能句子对齐：采用 Needleman-Wunsch 风格算法，处理插入、删除和替换
 - ⚙️ 命令行界面（CLI）和配置文件支持，方便重复使用
 - 🖥️ 图形化界面（GUI）支持（基于 customtkinter），提供更友好的操作体验
@@ -19,8 +20,8 @@
 
 ### 依赖
 - Python 3.8+
-- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)（需预下载 CTranslate2 格式模型）
-- 其他 Python 包：`shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
+- NVIDIA CUDA Toolkit 12.0+ （若使用CUDA计算）
+- 第三方Python库：`stable-ts`, `shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
 
 ### 安装步骤
 1. 克隆或下载本项目。
@@ -84,20 +85,21 @@ python cli.py config lang=en
 #### 处理音频与台本
 使用 `process` 命令生成字幕：
 ```bash
-python cli.py process "音频文件路径,台本文件路径" [-t srt|lrc] [-n 自定义名称] [-p]
+python cli.py process "音频文件路径,台本文件路径" [-t srt|lrc] [-n 自定义名称] [-p] [-s]
 ```
 - 参数 `INPUT_STR` 必须用英文逗号分隔两个文件路径，程序会自动识别音频文件和台本文件（台本文件扩展名需为 `.txt`，音频文件支持常见格式）。
 - `-t, --type`：输出格式，可选 `srt` 或 `lrc`，默认为 `srt`。
 - `-n, --name`：自定义输出文件名（不含扩展名），默认与音频文件同名。
 - `-p, --preprocess`：启用台本预处理，自动删除空行和方括号内容。
+- `-s, --shorter`：启用短句模式（按标点分割长句，生成更精确的字幕）。该模式利用单词级时间戳，将长句拆分为短句，适合台词密集的音频。
 
 **示例**：
 ```bash
 # 基本用法
 python cli.py process "meeting.wav,transcript.txt" -t lrc -n meeting_lyrics
 
-# 启用预处理
-python cli.py process "audio.mp3,script.txt" -t srt -p
+# 启用预处理和短句模式
+python cli.py process "audio.mp3,script.txt" -t srt -p -s
 ```
 输出文件将保存在音频文件所在目录，名为 `meeting_lyrics.lrc` 或 `audio.srt`。
 
@@ -118,7 +120,8 @@ python gui.py
 4. （可选）指定输出文件名（不含扩展名）
 5. 选择输出格式（SRT 或 LRC）
 6. 勾选“预处理台本”可自动清理空行和方括号标识
-7. 点击“开始处理”，实时查看进度和日志，处理完成后弹出提示
+7. 勾选“短句模式”可启用按标点分割长句，生成更精确的字幕
+8. 点击“开始处理”，实时查看进度和日志，处理完成后弹出提示
 
 关闭窗口时会弹出确认框，若正在处理则询问是否强制退出，确保子进程被终止。
 
@@ -161,7 +164,7 @@ vad_parameters = {}
 如果配置文件中缺少 `[advanced]` 节或某项参数，程序会使用默认值，不会报错。
 
 ## 项目结构
-- `director.py`：核心模块，包含语音识别、句子对齐、时间戳映射、字幕保存等功能。
+- `director.py`：核心模块，包含语音识别（基于 stable-whisper）、句子对齐、时间戳映射、字幕保存等功能。
 - `cli.py`：命令行入口，处理参数、配置文件并调用 `director.direct_it`。
 - `gui.py`：图形化界面入口，基于 customtkinter 实现，包含进度条和日志显示。
 - `pre_process.py`：台本预处理模块，提供文本清洗功能（删除空行、方括号内容等）。
@@ -170,6 +173,7 @@ vad_parameters = {}
 - 音频格式支持取决于 Faster Whisper（常见格式如 `wav`, `mp3`, `m4a` 等）。
 - 台本文件需为 UTF-8 编码的纯文本。
 - 预处理功能会删除行首的方括号标识（如 `[人名]` 或 `【动作】`），但保留句子内部的方括号（如 `他说[笑]`）。
+- 短句模式会启用单词级时间戳，识别速度略慢于普通模式，但字幕精确度更高，尤其适合台词密集或含有长句的音频。
 - 如果 Whisper 识别结果与台本差异较大，可尝试调整 `[advanced]` 中的 `gap_penalty` 和 `similarity_offset` 参数，以获得更佳的对齐效果。
 - 关闭 GUI 窗口时会强制终止所有子进程（包括 Faster Whisper 识别进程），确保程序完全退出。
 - 多进程隔离机制可防止 Faster Whisper 底层崩溃导致主程序异常退出。
