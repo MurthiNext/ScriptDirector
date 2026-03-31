@@ -1,4 +1,4 @@
-<h1><p align='center' >Script Director</p></h1>
+<h1><p align='center' >Script Director ROCm-Version</p></h1>
 <div align=center><img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector"/></div>
 
 ### &emsp;&emsp;这里是Script Director的ROCm-Version分支！即**AMD特供版**，通过使用ROCm强兼CUDA实现在AMD显卡上的硬件加速！由于MurthiNext没有高性能的AMD显卡用于测试，因此这个版本可能会出现各种问题，如果你执意要使用AMD显卡加速，请尝试自行修改代码并编译。
