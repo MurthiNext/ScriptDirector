@@ -1,6 +1,7 @@
 __pycache__
-.venv
 build
+cuda-venv
+rocm-venv
 dist
 misc
 faster-whisper-large-v3
@@ -13,3 +14,4 @@ processor.py
 cli.spec
 gui.spec
 output.lrc
+output.lrc.txt
