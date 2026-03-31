@@ -15,7 +15,7 @@ import time
 from logging.handlers import QueueHandler
 
 from director import direct_it, logger as director_logger, load_advanced_config
-from only_align import align_only   # 新增导入
+from only_align import align_only
 
 def load_advanced_config(config_path='config.ini'):
     """读取 [advanced] 节的配置，返回字典，未设置的项使用默认值"""
