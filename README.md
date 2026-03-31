@@ -48,7 +48,7 @@
 
 Script Director 提供两种使用方式：**命令行工具** `cli.py` 和 **图形界面** `gui.py`。
 
-以下内容的`python cli.py`均可替换为`.\cli.exe`。
+若你使用打包好的Release版本，以下内容的`python cli.py`均可替换为`.\cli.exe`。
 
 ### 1. 命令行工具（CLI）
 
