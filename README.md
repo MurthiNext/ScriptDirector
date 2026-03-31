@@ -18,8 +18,8 @@
 
 ### 依赖
 - Python 3.8+
-- [Faster Whisper](https://github.com/SYSTRAN/faster-whisper)（需预下载 CTranslate2 格式模型）
-- 其他 Python 包：`shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
+- NVIDIA CUDA Toolkit 12.0+ （若使用CUDA计算）
+- 第三方Python库：`faster-whisper`, `shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
 
 ### 安装步骤
 1. 克隆或下载本项目。
@@ -45,6 +45,8 @@
 ## 使用方法
 
 Script Director 提供两种使用方式：**命令行工具** `cli.py` 和 **图形界面** `gui.py`。
+
+若你使用打包好的Release版本，以下内容的`python cli.py`均可替换为`.\cli.exe`。
 
 ### 1. 命令行工具（CLI）
 
