@@ -13,7 +13,7 @@ import json
 import re
 
 __author__ = 'MurthiNext'
-__version__ = '1.9.9 Beta'
+__version__ = '2.0.0 Release'
 __date__ = '2026/03/31'
 
 if os.path.isfile('log.log'):
