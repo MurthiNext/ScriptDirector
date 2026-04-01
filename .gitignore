@@ -1,11 +1,8 @@
 __pycache__
-rocm-venv
-cuda-venv
 build
-cuda-venv
-rocm-venv
 dist
 misc
+*-venv
 faster-whisper-large-v3
 faster-whisper-large-v3-turbo
 audio.wav
@@ -13,7 +10,6 @@ log.log
 script.txt
 director_xxl.py
 processor.py
-cli.spec
-gui.spec
-output.lrc
-output.lrc.txt
+*.spec
+*.lrc
+*.srt
