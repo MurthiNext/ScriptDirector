@@ -13,8 +13,8 @@ import json
 import re
 
 __author__ = 'MurthiNext'
-__version__ = '2.0.0 Release'
-__date__ = '2026/03/31'
+__version__ = '2.1.0 Release'
+__date__ = '2026/04/01'
 
 if os.path.isfile('log.log'):
     with open('log.log', 'w', encoding='utf-8') as wf:
