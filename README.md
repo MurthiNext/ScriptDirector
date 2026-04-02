@@ -54,17 +54,16 @@
 
 ### 在Linux上安装（Ubuntu 24.04）
 1. 克隆或下载本项目。
-2. 按照特定方法安装依赖：
+2. 按照特定方法安装依赖（我尚不确定requirements.txt在Linux上是否起效）：
    ```bash
-   pip3 install -r requirements.txt # 安装所有需要的依赖项
-   pip3 uninstall torch torchvision triton torchaudio -y # 卸载为CUDA准备的PyTorch
-   # 获取PyTorch for ROCm 7.2.1
    wget https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1.lw.gitff65f5bc-cp312-cp312-linux_x86_64.whl
    wget https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torchvision-0.24.0%2Brocm7.2.1.gitb919bd0c-cp312-cp312-linux_x86_64.whl
    wget https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/triton-3.5.1%2Brocm7.2.1.gita272dfa8-cp312-cp312-linux_x86_64.whl
    wget https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/torchaudio-2.9.0%2Brocm7.2.1.gite3c6ee2b-cp312-cp312-linux_x86_64.whl
    # 安装PyTorch for ROCm 7.2.1
    pip3 install torch-2.9.1+rocm7.2.1.lw.gitff65f5bc-cp312-cp312-linux_x86_64.whl torchvision-0.24.0+rocm7.2.1.gitb919bd0c-cp312-cp312-linux_x86_64.whl torchaudio-2.9.0+rocm7.2.1.gite3c6ee2b-cp312-cp312-linux_x86_64.whl triton-3.5.1+rocm7.2.1.gita272dfa8-cp312-cp312-linux_x86_64.whl
+   # 安装主要依赖库，剩下的交给pip自动补全
+   pip3 install stable-ts psutil pysbd rapidfuzz click customtkinter
    ```
    理论上讲，Linux也可直接使用如下方法安装：
    ```bash
