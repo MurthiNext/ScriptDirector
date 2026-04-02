@@ -13,8 +13,8 @@ import json
 import re
 
 __author__ = 'MurthiNext'
-__version__ = '1.9.9 Beta'
-__date__ = '2026/03/31'
+__version__ = r"1.9.9 OMG It's My AMD!!!"
+__date__ = '2026/04/02'
 
 if os.path.isfile('log.log'):
     with open('log.log', 'w', encoding='utf-8') as wf:
@@ -351,6 +351,8 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
         default_duration = advanced.get('default_duration', 5.0)
         max_combine = advanced.get('max_combine', 5)  # 暂时未使用，保留
 
+        if device == 'cuda':
+            logger.warning('警告：由于你没有使用尊贵的NVIDIA显卡，该版本运行的Stable Whisper可能会出现114514种不同的问题，一切问题请归咎到AMD身上（？）')
         logger.info(f"加载模型: {local_model_path}")
         model = stable_whisper.load_faster_whisper(local_model_path, device=device, compute_type=compute_type)
 
