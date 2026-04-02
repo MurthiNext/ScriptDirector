@@ -3,6 +3,7 @@ build
 dist
 misc
 *-venv
+*.old
 faster-whisper-large-v3
 faster-whisper-large-v3-turbo
 audio.wav

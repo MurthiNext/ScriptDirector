@@ -248,6 +248,7 @@ def log_alignment_mapping(script_sents: List[str], target_sents: List[str], alig
                 script_to_target.setdefault(s_idx, []).append((t_info, t_info))
 
     logger.info(f"========== 对齐映射（{name_a} ↔ {name_b}） ==========")
+    output_text = ''
     for s_idx in sorted(script_to_target.keys()):
         ranges = sorted(script_to_target[s_idx])
         # 合并相邻或重叠的范围
@@ -272,7 +273,7 @@ def log_alignment_mapping(script_sents: List[str], target_sents: List[str], alig
         idx_str = ", ".join(idx_str_parts)
 
         sent_preview = script_sents[s_idx][:80] + "..." if len(script_sents[s_idx]) > 80 else script_sents[s_idx]
-        logger.info(f"  {name_a} [{s_idx}] ↔ 索引 [{idx_str}] : {sent_preview}")
+        output_text += f"  {name_a} [{s_idx}] ↔ 索引 [{idx_str}] : {sent_preview}\n"
 
         # 收集每个范围对应的单词文本
         words_detail = []
@@ -282,7 +283,8 @@ def log_alignment_mapping(script_sents: List[str], target_sents: List[str], alig
                 words_detail.append(f"[{r_start}] {texts[0]}")
             else:
                 words_detail.append(f"[{r_start}-{r_end}] {', '.join(texts)}")
-        logger.info(f"      {name_b}: {', '.join(words_detail)}")
+        output_text += f"      {name_b}: {', '.join(words_detail)}\n"
+    logger.info(output_text)
     logger.info("=" * 50)
 
 def _transcribe_unified(model, audio_path: str, language: str,
