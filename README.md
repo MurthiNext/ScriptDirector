@@ -28,9 +28,12 @@
 ### 在Windows10及以上的系统安装
 1. 克隆或下载本项目。
 2. 按照特定方法安装依赖：
+   方案一：
    ```bash
    pip install -r requirements.txt # 安装所有需要的依赖项
-   pip uninstall torch torchvision torchaudio -y # 卸载为CUDA准备的PyTorch
+   ```
+   方案二：
+   ```bash
    # 安装ROCm SDK
    pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl
    pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl
@@ -41,6 +44,8 @@
    pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
    pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
    pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
+   # 安装主要依赖库，剩下的交给pip自动补全
+   pip install stable-ts psutil pysbd rapidfuzz click customtkinter
    ```
 3. 下载 Faster Whisper 模型并解压到本地目录。
 
