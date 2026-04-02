@@ -48,7 +48,7 @@
    pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
    pip install --no-cache-dir https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
    # 安装主要依赖库，剩下的交给pip自动补全
-   pip install stable-ts psutil pysbd rapidfuzz click customtkinter
+   pip install stable-ts faster-whisper psutil pysbd rapidfuzz click customtkinter
    ```
 3. 下载 Faster Whisper 模型并解压到本地目录。
 
@@ -63,7 +63,7 @@
    # 安装PyTorch for ROCm 7.2.1
    pip3 install torch-2.9.1+rocm7.2.1.lw.gitff65f5bc-cp312-cp312-linux_x86_64.whl torchvision-0.24.0+rocm7.2.1.gitb919bd0c-cp312-cp312-linux_x86_64.whl torchaudio-2.9.0+rocm7.2.1.gite3c6ee2b-cp312-cp312-linux_x86_64.whl triton-3.5.1+rocm7.2.1.gita272dfa8-cp312-cp312-linux_x86_64.whl
    # 安装主要依赖库，剩下的交给pip自动补全
-   pip3 install stable-ts psutil pysbd rapidfuzz click customtkinter
+   pip3 install stable-ts faster-whisper psutil pysbd rapidfuzz click customtkinter
    ```
    理论上讲，Linux也可直接使用如下方法安装：
    ```bash
