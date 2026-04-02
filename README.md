@@ -28,9 +28,12 @@
 ### 在Windows10及以上的系统安装
 1. 克隆或下载本项目。
 2. 按照特定方法安装依赖：
+
    方案一：
    ```bash
-   pip install -r requirements.txt # 安装所有需要的依赖项
+   # 安装所有需要的依赖项
+   # 我已为其重新编写了库来源
+   pip install -r requirements.txt
    ```
    方案二：
    ```bash
