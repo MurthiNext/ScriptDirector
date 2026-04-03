@@ -1,4 +1,4 @@
-# Script Director 台本转字幕
+# Script Director ROCm-Version
 <div align=left>
    <img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>
    <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>
