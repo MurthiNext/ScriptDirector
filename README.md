@@ -1,9 +1,13 @@
-<h1><p align='center' >Script Director ROCm-Version</p></h1>
-<div align=center><img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector"/></div>
+# Script Director 台本转字幕
+<div align=left>
+   <img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>
+   <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>
+   <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector"/>
+</div>
 
-### &emsp;&emsp;这里是Script Director的ROCm-Version分支！即**AMD特供版**，通过使用ROCm强兼CUDA实现在AMD显卡上的硬件加速！由于MurthiNext没有高性能的AMD显卡用于测试，因此这个版本可能会出现各种问题，如果你执意要使用AMD显卡加速，请尝试自行修改代码并编译。
-### &emsp;&emsp;此分支基于BETA-DEV，不与正式版同步更新。请确保你有足够的知识储备来解决AMD留下来的兼容性问题（因为这东西实在麻烦……）同时，**务必仔细阅读该README的所有内容**，我已为其专门设计了AMD版本的文档。
-### &emsp;&emsp;Script Director 是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕（SRT/LRC）的工具。它利用 **Faster Whisper / Stable Whisper** 进行语音识别，并通过 **Needleman-Wunsch** 风格的动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
+### 这里是Script Director的ROCm-Version分支！即**AMD特供版**，通过使用ROCm强兼CUDA实现在AMD显卡上的硬件加速！由于MurthiNext没有高性能的AMD显卡用于测试，因此这个版本可能会出现各种问题，如果你执意要使用AMD显卡加速，请尝试自行修改代码并编译。
+### 此分支基于BETA-DEV，不与正式版同步更新。请确保你有足够的知识储备来解决AMD留下来的兼容性问题（因为这东西实在麻烦……）同时，**务必仔细阅读该README的所有内容**，我已为其专门设计了AMD版本的文档。
+### Script Director 是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕（SRT/LRC）的工具。它利用 **Faster Whisper / Stable Whisper** 进行语音识别，并通过 **Needleman-Wunsch** 风格的动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
 
 ## 特性
 
