@@ -1,7 +1,11 @@
-<h1><p align='center' >Script Director</p></h1>
-<div align=center><img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>   <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector"/></div>
+# Script Director 台本转字幕
+<div align=left>
+   <img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector"/>
+   <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector"/>
+   <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector"/>
+</div>
 
-### &emsp;&emsp;Script Director 是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕（SRT/LRC）的工具。它利用 **Faster Whisper / Stable Whisper** 进行语音识别，并通过 **Needleman-Wunsch** 风格的动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
+### Script Director是一个将音频文件与台本（文本）自动对齐，生成带时间戳字幕的工具。它利用 **Faster Whisper / Stable Whisper** 进行语音识别，并通过 **Needleman-Wunsch** 风格的动态规划算法将识别结果与台本句子精确匹配，即使识别结果与台本不完全一致也能智能插值，确保每一句台本都有准确的时间码。
 
 ## 特性
 
