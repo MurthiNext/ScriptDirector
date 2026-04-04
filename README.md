@@ -27,7 +27,7 @@
 ### 依赖
 - Python 3.12.10 （必须使用此版本）
 - AMD ROCm 7.2.1 （若使用AMD显卡加速，必须使用此版本）
-- 第三方Python库：`stable-ts`, `shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
+- 第三方Python库：`stable-ts`， `faster-whisper`, `shutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
 
 ### 在Windows10及以上的系统安装
 1. 克隆或下载本项目。
