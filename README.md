@@ -25,7 +25,7 @@
 ### 依赖
 - Python 3.8+
 - NVIDIA CUDA Toolkit 12.0+ （若使用CUDA计算）
-- 第三方Python库：`stable-ts`, `psutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
+- 第三方Python库：`stable-ts`， `faster-whisper`, `psutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
 
 ### 安装步骤
 1. 克隆或下载本项目。
