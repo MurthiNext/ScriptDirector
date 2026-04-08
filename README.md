@@ -73,7 +73,7 @@ python cli.py init
 - `gap_penalty`：对齐惩罚值，默认 `-10`
 - `similarity_offset`：相似度偏移，默认 `50`
 - `default_duration`：默认字幕时长（秒），默认 `5.0`
-- `max_combine`：最大合并片段数，默认 `5`
+- `max_combine`：最大合并片段数，默认 `20`
 - `beam_size`：束搜索宽度，默认 `5`
 - `vad_filter`：启用语音活动检测，默认 `False`
 - `vad_parameters`：VAD 参数（JSON 格式），默认 `{}`
