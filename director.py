@@ -19,7 +19,7 @@ from subtitles_toolkit import interpolate_timestamps
 from main_logger import logger
 
 __author__ = 'MurthiNext'
-__version__ = '2.1.5 Release'
+__version__ = '2.2.0 Beta'
 __date__ = '2026/04/08'
 
 # 进度相关常量

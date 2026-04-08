@@ -5,7 +5,6 @@ import multiprocessing
 import tkinter as tk
 import customtkinter as ctk
 import logging
-from logging.handlers import QueueHandler
 from tkinter import filedialog, messagebox
 
 from director import (
@@ -56,13 +55,12 @@ def open_file_dialog(file_type, initialdir=''):
     return path
 
 def processing_thread(app):
-    # 注意：此处不再为主进程的 logger 添加 QueueHandler，避免循环
-    # 日志队列的处理完全由主进程的 check_queues 负责
+    # 日志队列的处理完全由主进程的 check_queues 负责。
     while not app.stop_event.is_set():
         try:
             msg = cmd_queue.get(timeout=0.5)
             if msg[0] == 'start':
-                # 根据消息长度判断模式：长度为 11 是听写模式，长度为 12 是只对齐模式
+                # 根据消息长度判断模式：长度为 11 是听写模式，长度为 12 是只对齐模式。
                 if len(msg) == 11:  # 听写模式
                     (_, audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences) = msg
                     subtitle_path = None
