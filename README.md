@@ -25,7 +25,7 @@
 ### 依赖
 - Python 3.8+
 - NVIDIA CUDA Toolkit 12.0+ （若使用CUDA计算）
-- 第三方Python库：`stable-ts`， `faster-whisper`, `psutil`, `pysbd`, `rapidfuzz`, `click`（CLI 必须）, `customtkinter`（GUI 必须）
+- 第三方Python库：`stable-ts`， `faster-whisper`, `psutil`, `pysbd`, `rapidfuzz`, `click`, `customtkinter`, `tqdm`
 
 ### 安装步骤
 1. 克隆或下载本项目。
@@ -168,7 +168,7 @@ compute = float16
 gap_penalty = -10
 similarity_offset = 50
 default_duration = 5.0
-max_combine = 5
+max_combine = 20
 beam_size = 5
 vad_filter = False
 vad_parameters = {}
@@ -199,7 +199,6 @@ vad_parameters = {}
 - 如果 Whisper 识别结果与台本差异较大，可尝试调整 `[advanced]` 中的 `gap_penalty` 和 `similarity_offset` 参数，以获得更佳的对齐效果。
 - 关闭 GUI 窗口时会强制终止所有子进程（包括 Faster Whisper 识别进程），确保程序完全退出。
 - 多进程隔离机制可防止 Faster Whisper 底层崩溃导致主程序异常退出。
-- 进度条分为识别（0-95%）和对齐（95-100%）两个阶段，反映实际耗时差异。
 
 ## 许可证
 * 本项目采用 **MIT 许可证**。详情请参阅 [LICENSE](LICENSE) 文件。
