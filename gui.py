@@ -12,7 +12,7 @@ import psutil
 from logging.handlers import QueueHandler
 
 from director import direct_it, logger as director_logger, load_advanced_config
-from only_align import align_only
+from only_align import align_it
 
 def read_config():
     config = configparser.ConfigParser()
