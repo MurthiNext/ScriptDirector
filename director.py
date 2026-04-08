@@ -20,8 +20,8 @@ __version__ = '2.1.5 Release'
 __date__ = '2026/04/08'
 
 # 进度相关常量
-PROGRESS_TRANSCRIBE_MAX = 95
-PROGRESS_ALIGN_START = 95
+PROGRESS_TRANSCRIBE_MAX = 80
+PROGRESS_ALIGN_START = 80
 PROGRESS_ALIGN_END = 99
 PROGRESS_DONE = 100
 # 进程超时设置
@@ -51,7 +51,7 @@ def load_advanced_config(config_path='config.ini'):
         'gap_penalty': '-10',
         'similarity_offset': '50',
         'default_duration': '5.0',
-        'max_combine': '15',
+        'max_combine': '20',
         'beam_size': '5',
         'vad_filter': 'False',
         'vad_parameters': '{}',
@@ -132,7 +132,7 @@ def split_sentences_pysbd(text: str, language: str = 'ja') -> List[str]:
         logger.debug(f"句子 {i}: {sent[:50]}..." if len(sent) > 50 else f"句子 {i}: {sent}")
     return result
 
-def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_penalty: int = -10, similarity_offset: int = 50, max_combine: int = 5) -> List[Tuple[Optional[int], Optional[Tuple[int, int]]]]:
+def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_penalty: int = -10, similarity_offset: int = 50, max_combine: int = 5, progress_queue: Optional[multiprocessing.Queue] = None) -> List[Tuple[Optional[int], Optional[Tuple[int, int]]]]:
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
     该版本为重构后的增强版本，允许一个台本句子匹配连续的多个 Whisper 句子（范围），以更好地处理台本与识别结果之间的差异。
@@ -147,6 +147,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     match_range = [[None] * (m + 1) for _ in range(n + 1)]
 
     logger.info(f"开始对齐：台本 {n} 句，当前字幕 {m} 句")
+    logger.info('该过程较为耗时，性能主要受到max_combine参数影响，建议根据实际情况调整以平衡准确率和速度，请耐心等待...')
 
     # 初始化边界
     for i in range(1, n + 1):
@@ -204,6 +205,11 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
                 match_range[i][j] = ('delete', i-1)
             else:  # insert
                 match_range[i][j] = ('insert', j-1)
+
+        # 发送对齐进度（按台本句子比例，从 PROGRESS_ALIGN_START 到 PROGRESS_ALIGN_END）
+        if progress_queue is not None:
+            progress = int(PROGRESS_ALIGN_START + (i / n) * (PROGRESS_ALIGN_END - PROGRESS_ALIGN_START))
+            progress_queue.put(progress)
 
     # 回溯
     alignment = []
@@ -368,7 +374,7 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
     # 提取单词文本列表
     word_texts = [w[0] for w in all_words]
     # 对齐台本句子和单词序列（使用新的对齐函数，允许匹配范围）
-    alignment = align_sentence_lists(script_sents, word_texts, gap_penalty, similarity_offset, max_combine)
+    alignment = align_sentence_lists(script_sents, word_texts, gap_penalty, similarity_offset, max_combine, progress_queue=progress_queue)
     
     # 输出对齐日志（现在 alignment 中包含范围）
     log_alignment_mapping(script_sents, word_texts, alignment, "台本", "单词")
