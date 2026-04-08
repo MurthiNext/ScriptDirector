@@ -150,7 +150,7 @@ def parse_subtitle_file(filepath: str) -> List[Tuple[str, float, float]]:
     else:
         raise ValueError(f"不支持的字幕格式: {ext}")
 
-def align_only(script_path: str, subtitle_path: str, output_path: str,
+def align_it(script_path: str, subtitle_path: str, output_path: str,
                output_format: str = 'srt', preprocess: bool = False,
                short_sentences: bool = False, config_path: str = 'config.ini') -> None:
     """
