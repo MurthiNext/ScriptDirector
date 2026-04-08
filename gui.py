@@ -11,14 +11,14 @@ from tkinter import filedialog, messagebox
 from director import (
     direct_it,
     load_config,
-    kill_process_tree,
-    logger as director_logger
+    kill_process_tree
 )
 from only_align import align_it
 
 log_queue = multiprocessing.Queue()
 progress_queue = multiprocessing.Queue()
-status_queue = queue.Queue()
+cmd_queue = queue.Queue()          # 主线程 -> 工作线程：启动命令
+result_queue = queue.Queue()       # 工作线程 -> 主线程：执行结果
 
 def format_log_record(record):
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
@@ -56,17 +56,11 @@ def open_file_dialog(file_type, initialdir=''):
     return path
 
 def processing_thread(app):
-    # 为 director 的 logger 添加一个 QueueHandler，以便主进程的日志也能进入队列
-    for handler in director_logger.handlers:
-        if isinstance(handler, QueueHandler) and handler.queue == log_queue:
-            break
-    else:
-        queue_handler = QueueHandler(log_queue)
-        director_logger.addHandler(queue_handler)
-
+    # 注意：此处不再为主进程的 logger 添加 QueueHandler，避免循环
+    # 日志队列的处理完全由主进程的 check_queues 负责
     while not app.stop_event.is_set():
         try:
-            msg = status_queue.get(timeout=0.5)
+            msg = cmd_queue.get(timeout=0.5)
             if msg[0] == 'start':
                 # 根据消息长度判断模式：长度为 11 是听写模式，长度为 12 是只对齐模式
                 if len(msg) == 11:  # 听写模式
@@ -90,7 +84,7 @@ def processing_thread(app):
                             short_sentences=short_sentences,
                             config_path='config.ini'
                         )
-                        status_queue.put(('success', output_path))
+                        result_queue.put(('success', output_path))
                     else:
                         # 听写模式（原有逻辑）
                         audio_dir = os.path.dirname(audio) or '.'
@@ -111,9 +105,9 @@ def processing_thread(app):
                             short_sentences=short_sentences,
                             verbose=None
                         )
-                        status_queue.put(('success', output_path))
+                        result_queue.put(('success', output_path))
                 except Exception as e:
-                    status_queue.put(('error', str(e)))
+                    result_queue.put(('error', str(e)))
         except queue.Empty:
             continue
 
@@ -126,6 +120,11 @@ class App(ctk.CTk):
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
+
+        # 定义全局字体（微软雅黑，大小12）
+        self.default_font = ctk.CTkFont(family="Microsoft YaHei", size=13)
+        self.button_font = ctk.CTkFont(family="Microsoft YaHei", size=14, weight="bold")
+        self.log_font = ctk.CTkFont(family="Microsoft YaHei", size=12)
 
         self.is_processing = False
         self.stop_event = threading.Event()
@@ -157,34 +156,34 @@ class App(ctk.CTk):
         row = 0
 
         # 模型路径
-        self.model_label = ctk.CTkLabel(self.left_frame, text="模型路径：", anchor="e", width=100)
+        self.model_label = ctk.CTkLabel(self.left_frame, text="模型路径：", anchor="e", width=100, font=self.default_font)
         self.model_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.model_entry = ctk.CTkEntry(self.left_frame)
+        self.model_entry = ctk.CTkEntry(self.left_frame, font=self.default_font)
         self.model_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
-        self.model_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, command=self.browse_model)
+        self.model_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, font=self.button_font, command=self.browse_model)
         self.model_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
         # 语言代码
-        self.lang_label = ctk.CTkLabel(self.left_frame, text="语言代码：", anchor="e", width=100)
+        self.lang_label = ctk.CTkLabel(self.left_frame, text="语言代码：", anchor="e", width=100, font=self.default_font)
         self.lang_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.lang_combo = ctk.CTkOptionMenu(self.left_frame, values=["ja", "zh", "en", "ko", "fr", "de", "ru", "es"])
+        self.lang_combo = ctk.CTkOptionMenu(self.left_frame, values=["ja", "zh", "en", "ko", "fr", "de", "ru", "es"], font=self.default_font)
         self.lang_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
         self.lang_combo.set("ja")
         row += 1
 
         # 设备类型
-        self.device_label = ctk.CTkLabel(self.left_frame, text="设备类型：", anchor="e", width=100)
+        self.device_label = ctk.CTkLabel(self.left_frame, text="设备类型：", anchor="e", width=100, font=self.default_font)
         self.device_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.device_combo = ctk.CTkOptionMenu(self.left_frame, values=["cuda", "cpu"])
+        self.device_combo = ctk.CTkOptionMenu(self.left_frame, values=["cuda", "cpu"], font=self.default_font)
         self.device_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
         self.device_combo.set("cuda")
         row += 1
 
         # 计算类型
-        self.compute_label = ctk.CTkLabel(self.left_frame, text="计算类型：", anchor="e", width=100)
+        self.compute_label = ctk.CTkLabel(self.left_frame, text="计算类型：", anchor="e", width=100, font=self.default_font)
         self.compute_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.compute_combo = ctk.CTkOptionMenu(self.left_frame, values=["float16", "int8_float16", "int8", "float32"])
+        self.compute_combo = ctk.CTkOptionMenu(self.left_frame, values=["float16", "int8_float16", "int8", "float32"], font=self.default_font)
         self.compute_combo.grid(row=row, column=1, padx=5, pady=5, sticky="w")
         self.compute_combo.set("float16")
         row += 1
@@ -195,43 +194,43 @@ class App(ctk.CTk):
         row += 1
 
         # 音频文件
-        self.audio_label = ctk.CTkLabel(self.left_frame, text="音频文件：", anchor="e", width=100)
+        self.audio_label = ctk.CTkLabel(self.left_frame, text="音频文件：", anchor="e", width=100, font=self.default_font)
         self.audio_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.audio_entry = ctk.CTkEntry(self.left_frame)
+        self.audio_entry = ctk.CTkEntry(self.left_frame, font=self.default_font)
         self.audio_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
-        self.audio_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, command=self.browse_audio)
+        self.audio_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, font=self.button_font, command=self.browse_audio)
         self.audio_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
         # 台本文件
-        self.script_label = ctk.CTkLabel(self.left_frame, text="台本文件：", anchor="e", width=100)
+        self.script_label = ctk.CTkLabel(self.left_frame, text="台本文件：", anchor="e", width=100, font=self.default_font)
         self.script_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.script_entry = ctk.CTkEntry(self.left_frame)
+        self.script_entry = ctk.CTkEntry(self.left_frame, font=self.default_font)
         self.script_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
-        self.script_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, command=self.browse_script)
+        self.script_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, font=self.button_font, command=self.browse_script)
         self.script_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
         # 字幕文件（新增）
-        self.subtitle_label = ctk.CTkLabel(self.left_frame, text="[可选]已有字幕：", anchor="e", width=100)
+        self.subtitle_label = ctk.CTkLabel(self.left_frame, text="[可选]已有字幕：", anchor="e", width=100, font=self.default_font)
         self.subtitle_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.subtitle_entry = ctk.CTkEntry(self.left_frame)
+        self.subtitle_entry = ctk.CTkEntry(self.left_frame, font=self.default_font)
         self.subtitle_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
-        self.subtitle_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, command=self.browse_subtitle)
+        self.subtitle_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, font=self.button_font, command=self.browse_subtitle)
         self.subtitle_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
         # 输出名称
-        self.name_label = ctk.CTkLabel(self.left_frame, text="输出名称：", anchor="e", width=100)
+        self.name_label = ctk.CTkLabel(self.left_frame, text="输出名称：", anchor="e", width=100, font=self.default_font)
         self.name_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.name_entry = ctk.CTkEntry(self.left_frame)
+        self.name_entry = ctk.CTkEntry(self.left_frame, font=self.default_font)
         self.name_entry.grid(row=row, column=1, columnspan=2, padx=5, pady=5, sticky="ew")
         row += 1
 
         # 输出格式
-        self.type_label = ctk.CTkLabel(self.left_frame, text="输出格式：", anchor="e", width=100)
+        self.type_label = ctk.CTkLabel(self.left_frame, text="输出格式：", anchor="e", width=100, font=self.default_font)
         self.type_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.type_menu = ctk.CTkOptionMenu(self.left_frame, values=["srt", "lrc"], width=120)
+        self.type_menu = ctk.CTkOptionMenu(self.left_frame, values=["srt", "lrc"], width=120, font=self.default_font)
         self.type_menu.grid(row=row, column=1, padx=5, pady=5, sticky="w")
         self.type_menu.set("srt")
         row += 1
@@ -241,7 +240,8 @@ class App(ctk.CTk):
         self.preprocess_check = ctk.CTkCheckBox(
             self.left_frame,
             text="预处理台本（删除空行和方括号标识）",
-            variable=self.preprocess_var
+            variable=self.preprocess_var,
+            font=self.default_font
         )
         self.preprocess_check.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="w")
         row += 1
@@ -251,7 +251,8 @@ class App(ctk.CTk):
         self.short_sentences_check = ctk.CTkCheckBox(
             self.left_frame,
             text="短句模式（按标点分割长句，生成更精确的字幕）",
-            variable=self.short_sentences_var
+            variable=self.short_sentences_var,
+            font=self.default_font
         )
         self.short_sentences_check.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="w")
         # 绑定事件：当字幕文件变化时，动态启用/禁用短句模式复选框
@@ -260,26 +261,26 @@ class App(ctk.CTk):
 
         row += 1
         # 开始按钮
-        self.start_btn = ctk.CTkButton(self.left_frame, text="开始处理", width=150, height=35, command=self.start_processing)
+        self.start_btn = ctk.CTkButton(self.left_frame, text="开始处理", width=150, height=35, font=self.button_font, command=self.start_processing)
         self.start_btn.grid(row=row, column=0, columnspan=3, padx=5, pady=10)
 
         # ---------- 右侧区域 ----------
         # 进度条区域
-        self.progress_label = ctk.CTkLabel(self.right_frame, text="处理进度：", anchor="w")
+        self.progress_label = ctk.CTkLabel(self.right_frame, text="处理进度：", anchor="w", font=self.default_font)
         self.progress_label.pack(pady=(5, 0), padx=10, anchor="w")
 
         self.progress_bar = ctk.CTkProgressBar(self.right_frame)
         self.progress_bar.pack(pady=5, padx=10, fill="x")
         self.progress_bar.set(0)
 
-        self.progress_text = ctk.CTkLabel(self.right_frame, text="0%", anchor="w")
+        self.progress_text = ctk.CTkLabel(self.right_frame, text="0%", anchor="w", font=self.default_font)
         self.progress_text.pack(pady=(0, 10), padx=10, anchor="w")
 
         # 日志区域
-        self.log_label = ctk.CTkLabel(self.right_frame, text="运行日志：", anchor="w")
+        self.log_label = ctk.CTkLabel(self.right_frame, text="运行日志：", anchor="w", font=self.default_font)
         self.log_label.pack(pady=(10, 0), padx=10, anchor="w")
 
-        self.log_text = ctk.CTkTextbox(self.right_frame, wrap="word")
+        self.log_text = ctk.CTkTextbox(self.right_frame, wrap="word", font=self.log_font)
         self.log_text.pack(pady=5, padx=10, fill="both", expand=True)
 
         # 从配置文件填充默认值
@@ -304,7 +305,9 @@ class App(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def on_subtitle_change(self, event=None):
-        """当字幕文件输入框内容变化时，调整短句模式复选框的可用性"""
+        """
+        当字幕文件输入框内容变化时，调整短句模式复选框的可用性。
+        """
         if self.subtitle_entry.get().strip():
             # 有字幕文件，禁用短句模式复选框并添加提示
             self.short_sentences_check.configure(state="disabled")
@@ -405,28 +408,29 @@ class App(ctk.CTk):
         self.append_log("=============================")
 
         self.is_processing = True
-        # 根据是否有字幕文件决定消息格式
+        # 根据是否有字幕文件决定命令格式
         if subtitle:
             # 只对齐模式：传递字幕文件路径
-            status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences, subtitle))
+            cmd_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences, subtitle))
         else:
             # 听写模式
-            status_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences))
+            cmd_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences))
 
     def append_log(self, msg):
         self.log_text.insert("end", msg + "\n")
         self.log_text.see("end")
 
     def check_queues(self):
-        # 处理日志队列
         try:
             while True:
                 item = log_queue.get_nowait()
                 if isinstance(item, logging.LogRecord):
                     msg = format_log_record(item)
+                    self.append_log(msg)
+                    with open('log.log', 'a', encoding='utf-8') as f:
+                        f.write(msg + '\n')
                 else:
-                    msg = str(item)
-                self.append_log(msg)
+                    self.append_log(str(item))
         except queue.Empty:
             pass
 
@@ -441,9 +445,9 @@ class App(ctk.CTk):
         except queue.Empty:
             pass
 
-        # 处理状态队列
+        # 处理结果队列
         try:
-            msg = status_queue.get_nowait()
+            msg = result_queue.get_nowait()
             if msg[0] == 'success':
                 self.is_processing = False
                 self.append_log(f"成功生成字幕：{msg[1]}")
