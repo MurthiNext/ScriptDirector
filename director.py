@@ -9,12 +9,14 @@ import configparser
 import json
 import re
 import psutil
+import numpy as np
 from typing import List, Tuple, Optional, Union
 from logging.handlers import QueueHandler
 from rapidfuzz import fuzz
 from faster_whisper import WhisperModel
 
 from subtitles_toolkit import interpolate_timestamps
+from main_logger import logger
 
 __author__ = 'MurthiNext'
 __version__ = '2.1.5 Release'
@@ -29,20 +31,6 @@ PROGRESS_DONE = 100
 PROCESS_TIMEOUT = 3600
 # 编译正则表达式
 _PUNCT_SPLIT_RE = re.compile(r'(?<=[。！？…、．])\s*')
-
-if os.path.isfile('log.log'):
-    with open('log.log', 'w', encoding='utf-8') as wf:
-        wf.write('')
-logger = logging.getLogger('director')
-logger.setLevel(logging.INFO)
-if not logger.handlers:
-    fh = logging.FileHandler('log.log', encoding='utf-8') # 文件处理器
-    ch = logging.StreamHandler() # 终端处理器
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
-    fh.setFormatter(formatter)
-    ch.setFormatter(formatter)
-    logger.addHandler(fh)
-    logger.addHandler(ch)
 
 # 工具函数
 
@@ -132,7 +120,9 @@ def save_lrc(subtitles: List[Tuple[str, float, float]], output_path: str) -> Non
     logger.info(f"已保存 LRC 歌词到 {output_path}")
 
 def kill_process_tree(pid: int) -> None:
-    """递归终止进程及其所有子进程"""
+    """
+    归终止进程及其所有子进程。
+    """
     try:
         parent = psutil.Process(pid)
         children = parent.children(recursive=True)
@@ -145,7 +135,9 @@ def kill_process_tree(pid: int) -> None:
         pass
 
 def normalize_subtitle_text(text: str) -> str:
-    """删除字幕文本中的空行和内部换行，将多行合并为一行。"""
+    """
+    删除字幕文本中的空行和内部换行，将多行合并为一行。
+    """
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     return ' '.join(lines)
 
@@ -162,9 +154,7 @@ def split_sentences_pysbd(text: str, language: str = 'ja') -> List[str]:
     segmenter = pysbd.Segmenter(language=language, clean=False)
     sentences = segmenter.segment(text)
     result = [s.strip() for s in sentences if s.strip()]
-    logger.info(f"台本分割为 {len(result)} 个句子")
-    for i, sent in enumerate(result, 1):
-        logger.debug(f"句子 {i}: {sent[:50]}..." if len(sent) > 50 else f"句子 {i}: {sent}")
+    logger.info(f"台本分割为 {len(result)} 个句子。")
     return result
 
 def split_text_by_punctuation(text: str) -> List[str]:
@@ -173,7 +163,9 @@ def split_text_by_punctuation(text: str) -> List[str]:
     return [p.strip() for p in parts if p.strip()]
 
 def is_punctuation_only(text: str) -> bool:
-    """判断文本是否只包含标点符号和空白"""
+    """
+    判断文本是否只包含标点符号和空白。
+    """
     punct = set('。！？…．、，．？！；：""''（）【】《》')
     for ch in text.strip():
         if ch not in punct and not ch.isspace():
@@ -190,7 +182,7 @@ def log_alignment_mapping(
     """
     记录对齐映射关系，格式：
       完整句子 [台本编号] ↔ 索引范围 [范围] : 台本句子内容
-          散落的单词: [范围] 单词文本, ...
+          散落的单词: [范围] 单词文本
     现在 alignment 中的 target 可以是整数索引或元组范围。
     """
     # 建立 script_idx -> 对应的 target 列表（可能是范围或单个索引）
@@ -244,8 +236,6 @@ def log_alignment_mapping(
     logger.info(output_text)
     logger.info("=" * 50)
 
-# 主干工作函数
-
 def _align_sentence_lists(
         script_sents: List[str],
         whisper_sents: List[str],
@@ -253,30 +243,35 @@ def _align_sentence_lists(
         similarity_offset: int = 50,
         max_combine: int = 5,
         progress_queue: Optional[multiprocessing.Queue] = None
-    ) -> List[Tuple[Optional[int], Optional[Tuple[int, int]]]]:
+) -> List[Tuple[Optional[int], Optional[Tuple[int, int]]]]:
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
     该版本为重构后的增强版本，允许一个台本句子匹配连续的多个 Whisper 句子（范围），以更好地处理台本与识别结果之间的差异。
     原版本存入only_align.py，供只对齐模式使用。
+    使用 numpy 优化内存占用。
 
     返回对齐路径列表，每个元素为 (script_idx, whisper_range)，允许 None 表示插入/删除。
     whisper_range 是一个元组 (start_idx, end_idx)，表示连续的一段单词索引。
     """
     n, m = len(script_sents), len(whisper_sents)
-    dp = [[0] * (m + 1) for _ in range(n + 1)]
-    # 记录匹配的单词范围，用于回溯
-    match_range = [[None] * (m + 1) for _ in range(n + 1)]
+    
+    dp = np.zeros((n + 1, m + 1), dtype=np.int32) # numpy DP表
+    match_range = [[None] * (m + 1) for _ in range(n + 1)] # 记录匹配的单词范围，用于回溯
 
-    logger.info(f"开始对齐：台本 {n} 句，当前字幕 {m} 句")
-    logger.info('该过程较为耗时，性能主要受到max_combine参数影响，建议根据实际情况调整以平衡准确率和速度，请耐心等待...')
+    # 估算内存开销
+    dp_mem = (n + 1) * (m + 1) * 4 / (1024 ** 2)  # 4 Bytes per int32
+    match_range_mem = (n + 1) * (m + 1) * 56 / (1024 ** 2)  # 56 Bytes per cell
+    logger.info(f">正在运行对齐算法(_align_sentence_lists)")
+    logger.info(f">台本句子数为n={n}，字幕句子数为m={m}，max_combine为K={max_combine}。")
+    logger.info(f">时间复杂度O(n*m*K)，空间复杂度O(n*m)。")
+    logger.info(f">估算内存占用：DP表约为{dp_mem:.2f}MB；match_range表约为{match_range_mem:.2f}MB。")
 
     # 初始化边界
     for i in range(1, n + 1):
-        dp[i][0] = dp[i-1][0] + gap_penalty
-        # 匹配范围记录为删除
+        dp[i, 0] = dp[i-1, 0] + gap_penalty
         match_range[i][0] = ('delete', i-1)
     for j in range(1, m + 1):
-        dp[0][j] = dp[0][j-1] + gap_penalty
+        dp[0, j] = dp[0, j-1] + gap_penalty
         match_range[0][j] = ('insert', j-1)
 
     # 填充 DP 表
@@ -284,40 +279,38 @@ def _align_sentence_lists(
         for j in range(1, m + 1):
             # 1. 考虑匹配一个单词
             sim_single = fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - similarity_offset
-            match_single = dp[i-1][j-1] + sim_single
+            match_single = dp[i-1, j-1] + sim_single
             best_score = match_single
-            best_range = (j-1, j-1)  # 单个单词范围
+            best_range = (j-1, j-1)
             best_type = 'match_single'
 
             # 2. 考虑匹配连续多个单词（最多 max_combine 个）
             max_len = min(max_combine, j)
             for length in range(2, max_len + 1):
-                # 取连续 length 个单词：j-length 到 j-1
                 start = j - length
-                # 拼接单词文本
                 combined_text = ' '.join(whisper_sents[start:j])
                 sim = fuzz.token_set_ratio(script_sents[i-1], combined_text) - similarity_offset
-                score = dp[i-1][start] + sim
+                score = dp[i-1, start] + sim
                 if score > best_score:
                     best_score = score
                     best_range = (start, j-1)
                     best_type = 'match_multi'
 
             # 3. 删除（台本句子未匹配任何单词）
-            delete = dp[i-1][j] + gap_penalty
+            delete = dp[i-1, j] + gap_penalty
             if delete > best_score:
                 best_score = delete
                 best_type = 'delete'
                 best_range = None
 
             # 4. 插入（Whisper 单词未匹配任何台本句子）
-            insert = dp[i][j-1] + gap_penalty
+            insert = dp[i, j-1] + gap_penalty
             if insert > best_score:
                 best_score = insert
                 best_type = 'insert'
                 best_range = None
 
-            dp[i][j] = best_score
+            dp[i, j] = best_score
             if best_type == 'match_single':
                 match_range[i][j] = ('match', (j-1, j-1))
             elif best_type == 'match_multi':
@@ -327,7 +320,6 @@ def _align_sentence_lists(
             else:  # insert
                 match_range[i][j] = ('insert', j-1)
 
-        # 发送对齐进度（按台本句子比例，从 PROGRESS_ALIGN_START 到 PROGRESS_ALIGN_END）
         if progress_queue is not None:
             progress = int(PROGRESS_ALIGN_START + (i / n) * (PROGRESS_ALIGN_END - PROGRESS_ALIGN_START))
             progress_queue.put(progress)
@@ -341,18 +333,15 @@ def _align_sentence_lists(
             if typ == 'match':
                 start_idx, end_idx = data
                 alignment.append((i-1, (start_idx, end_idx)))
-                logger.debug(f"匹配: 台本 {i-1} <-> Whisper 范围 [{start_idx}-{end_idx}]")
                 i -= 1
                 j = start_idx
                 continue
             elif typ == 'delete':
                 alignment.append((i-1, None))
-                logger.debug(f"台本插入: {i-1}")
                 i -= 1
                 continue
             elif typ == 'insert':
                 alignment.append((None, data))
-                logger.debug(f"Whisper 删除: {data}")
                 j -= 1
                 continue
         if i > 0:
@@ -375,8 +364,9 @@ def _transcribe_unified(
         progress_queue: Optional[multiprocessing.Queue],
         verbose: Union[bool, None] = True
     ) -> Tuple[List[Tuple[str, float, float]], float]:
-    """统一转录：返回单词列表（word, start, end）和总时长，同时发送进度，并实时记录识别片段"""
-    logger.info("开始转录音频...")
+    """
+    统一转录：返回单词列表（word, start, end）和总时长，同时发送进度，并实时记录识别片段。
+    """
     # 定义内部进度回调
     def progress_cb(p, eta):
         if progress_queue is not None and eta > 0:
@@ -401,7 +391,6 @@ def _transcribe_unified(
                 all_words.append((w.word.strip(), w.start, w.end))
     if total_duration is None and all_words:
         total_duration = all_words[-1][2]
-    logger.info(f"识别完成，共 {len(all_words)} 个单词")
     if progress_queue is not None:
         progress_queue.put(PROGRESS_TRANSCRIBE_MAX)
     return all_words, total_duration
@@ -411,19 +400,23 @@ def _prepare_script(
         preprocess: bool,
         short_sentences: bool
     ) -> Tuple[str, List[str]]:
-    """读取并分割台本，返回原始文本和句子列表（如果短句模式，则进一步按标点拆分成短句）"""
+    """
+    读取并分割台本，返回原始文本和句子列表。
+    短句模式按标点分割，长句模式使用 pysbd。
+    """
     with open(script_path, 'r', encoding='utf-8') as f:
         script_text = f.read().strip()
     if preprocess:
         from pre_process import clean_script_text
         script_text = clean_script_text(script_text)
-        logger.info("已对台本进行预处理（删除空行和方括号内容）")
-    logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符")
+        logger.info("已对台本进行预处理（删除空行和方括号内容）。")
+    logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符。")
     if short_sentences:
         script_sents = split_text_by_punctuation(script_text)
-        logger.info(f"按标点分割台本为 {len(script_sents)} 个短句")
+        logger.info(f"已按标点分割台本。")
     else:
         script_sents = split_sentences_pysbd(script_text)
+        logger.info(f"已按pysbd分割台本。")
     return script_text, script_sents
 
 def _build_subtitles_from_words(
@@ -460,17 +453,17 @@ def _build_subtitles_from_words(
             start = all_words[start_idx][1]
             end = all_words[end_idx][2]
             time_map[s_idx] = (start, end)
-            logger.debug(f"句子 {s_idx} 匹配单词范围 {start_idx}-{end_idx}, 时间 [{start:.2f}-{end:.2f}]")
+    logger.info(f"时间映射构建完成，匹配到时间的句子数: {len(time_map)} / {len(script_sents)}")
 
     # 生成字幕
     interpolated = interpolate_timestamps(time_map, len(script_sents), default_duration)
+    logger.info(f"时间轴差值完成，生成 {len(interpolated)} 条源字幕（包含插值）。")
     result = []
     for idx, start, end in interpolated:
         text = normalize_subtitle_text(script_sents[idx])
         if not text:
             continue
         result.append((text, start, end))
-        logger.debug(f"句子 {idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
 
     # 过滤纯标点行
     filtered = []
@@ -478,7 +471,7 @@ def _build_subtitles_from_words(
         if not is_punctuation_only(text):
             filtered.append((text, start, end))
     filtered = normalize_subtitles(filtered)
-    logger.info(f"生成 {len(filtered)} 条字幕（过滤后）")
+    logger.info(f"经过过滤得到 {len(filtered)} 条字幕。")
     return filtered
 
 def _run_whisper_task(
@@ -519,25 +512,29 @@ def _run_whisper_task(
         default_duration = settings.get('default_duration', 5.0)
         max_combine = settings.get('max_combine', 5)
 
-        logger.info(f"加载模型: {local_model_path}")
+        logger.info("正在加载模型...")
         model = stable_whisper.load_faster_whisper(local_model_path, device=device, compute_type=compute_type)
+        logger.info(f'模型加载完成：{local_model_path}')
 
         # 获取单词列表
+        logger.info("开始转录音频并获取单词列表。")
         all_words, total_duration = _transcribe_unified(model, audio_path, language, beam_size, vad_filter, vad_parameters, progress_queue, verbose)
+        logger.info(f"转录完成，获取到 {len(all_words)} 个单词，总时长 {total_duration:.2f} 秒。")
 
-        # 准备台本句子
+        # 准备台本句子列表
         _, script_sents = _prepare_script(script_path, preprocess, short_sentences)
+        logger.info(f"台本准备完成，获取到 {len(script_sents)} 个句子。")
 
         # 生成字幕（使用增强的对齐，允许匹配范围）
+        logger.info("开始对齐台本句子与单词列表并生成字幕。")
         subtitles = _build_subtitles_from_words(
             script_sents, all_words, gap_penalty, similarity_offset, default_duration, max_combine, progress_queue
         )
-
         result_queue.put(('result', subtitles))
         result_queue.close()
         result_queue.join_thread()
+        logger.info("处理完成，结果已放回队列，正在结束子进程。")
         time.sleep(0.5)
-        logger.info("处理完成，结果已放回队列。")
         if progress_queue is not None:
             progress_queue.put(PROGRESS_ALIGN_END)
 
@@ -608,9 +605,12 @@ def direct_it(
 
     p.join(timeout=10)
     if p.is_alive():
-        logger.warning("子进程未及时退出，强制终止")
+        logger.warning("子进程未及时退出，强制终止。")
         kill_process_tree(p.pid)
         p.join()
+
+    if subtitles:
+        logger.info('主进程已获取到字幕。正在保存字幕文件...')
 
     ext = os.path.splitext(output_path)[1].lower()
     if ext == '.lrc':
@@ -631,5 +631,6 @@ if __name__ == "__main__":
         language='ja',                           # 语言代码
         device='cuda',                           # 计算设备 'cuda' 或 'cpu'
         compute_type='float16',                   # 计算类型
-        short_sentences=True                    # 启用短句模式
+        short_sentences=True,                    # 启用短句模式
+        verbose=False
     )

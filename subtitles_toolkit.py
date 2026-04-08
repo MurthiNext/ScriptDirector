@@ -2,8 +2,14 @@ import re
 import os
 from typing import List, Tuple, Dict
 
+from main_logger import logger
+
 def parse_srt_file(filepath: str) -> List[Tuple[str, float, float]]:
-    """解析 SRT 文件，返回 (文本, 开始时间, 结束时间) 列表"""
+    """
+    解析 SRT 文件，返回 (文本, 开始时间, 结束时间) 列表。
+    时间格式为 "HH:MM:SS,mmm"，转换为秒数。
+    """
+    logger.info(f"正在解析 SRT 文件: {filepath}")
     with open(filepath, 'r', encoding='utf-8') as f:
         content = f.read().strip()
     pattern = re.compile(
@@ -18,10 +24,16 @@ def parse_srt_file(filepath: str) -> List[Tuple[str, float, float]]:
         end = sum(x * int(t) for x, t in zip([3600, 60, 1, 0.001], re.split('[:,]', end_str)))
         text = text.replace('\n', ' ').strip()
         segments.append((text, start, end))
+    logger.info(f"SRT 文件解析完成，提取到 {len(segments)} 条字幕。")
     return segments
 
 def parse_lrc_file(filepath: str) -> List[Tuple[str, float, float]]:
-    """解析 LRC 文件，返回 (文本, 开始时间, 结束时间) 列表（结束时间设为下一句的开始或默认值）"""
+    """
+    解析 LRC 文件，返回 (文本, 开始时间, 结束时间) 列表。
+    结束时间通过下一个时间戳推断，最后一个字幕默认持续 3 秒。
+    时间格式为 "[MM:SS.xx]"，转换为秒数。
+    """
+    logger.info(f"正在解析 LRC 文件: {filepath}")
     with open(filepath, 'r', encoding='utf-8') as f:
         lines = f.readlines()
     segments = []
@@ -42,10 +54,13 @@ def parse_lrc_file(filepath: str) -> List[Tuple[str, float, float]]:
     if segments:
         last_text, last_start, _ = segments[-1]
         segments[-1] = (last_text, last_start, last_start + 3.0)
+    logger.info(f"LRC 文件解析完成，提取到 {len(segments)} 条字幕。")
     return segments
 
 def parse_subtitle_file(filepath: str) -> List[Tuple[str, float, float]]:
-    """根据扩展名解析字幕文件"""
+    """
+    根据扩展名解析字幕文件。
+    """
     ext = os.path.splitext(filepath)[1].lower()
     if ext == '.srt':
         return parse_srt_file(filepath)
@@ -63,6 +78,9 @@ def interpolate_timestamps(
     根据已匹配句子的时间映射，为所有句子（包括未匹配的）插值生成时间。
     返回列表，每个元素为 (句子索引, 开始时间, 结束时间)
     """
+    logger.info(f">正在运行时间轴差值算法(interpolate_timestamps)")
+    logger.info(f">台本句子数为n={total_sents}，已匹配时间的句子数为{len(time_map)}。")
+    logger.info(f">时间复杂度O(n²)，空间复杂度O(n)。")
     result = []
     for idx in range(total_sents):
         if idx in time_map:

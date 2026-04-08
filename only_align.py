@@ -6,13 +6,13 @@ from director import (
     log_alignment_mapping,
     save_srt,
     save_lrc,
-    load_config,
-    logger
+    load_config
 )
 from subtitles_toolkit import (
     interpolate_timestamps,
     parse_subtitle_file
 )
+from main_logger import logger
 
 def align_sentence_lists_legacy(
         script_sents: List[str],
@@ -27,7 +27,7 @@ def align_sentence_lists_legacy(
     n, m = len(script_sents), len(whisper_sents)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
 
-    logger.info(f"开始对齐（旧版）：台本 {n} 句，字幕 {m} 句")
+    logger.info(f"开始对齐（旧版）：台本 {n} 句，字幕 {m} 句。")
 
     for i in range(1, n + 1):
         dp[i][0] = dp[i-1][0] + gap_penalty
@@ -88,12 +88,11 @@ def map_timestamps(
     for script_idx in matched_indices:
         whisper_idxs = script_to_whisper[script_idx]
         if len(whisper_idxs) > max_combine:
-            logger.warning(f"句子 {script_idx} 匹配了 {len(whisper_idxs)} 个片段，超过 max_combine={max_combine}，仅保留前 {max_combine} 个")
+            logger.warning(f"句子 {script_idx} 匹配了 {len(whisper_idxs)} 个片段，超过 max_combine={max_combine}，仅保留前 {max_combine} 个。")
             whisper_idxs = whisper_idxs[:max_combine]
         start_time = whisper_segments[whisper_idxs[0]].start
         end_time = whisper_segments[whisper_idxs[-1]].end
         time_map[script_idx] = (start_time, end_time)
-        logger.debug(f"句子 {script_idx} 时间: {start_time:.2f} -> {end_time:.2f}")
 
     # 第三步：使用公共插值函数
     interpolated = interpolate_timestamps(time_map, len(script_sents), default_duration)
@@ -124,14 +123,14 @@ def align_it(script_path: str, subtitle_path: str, output_path: str,
         from pre_process import clean_script_text
         script_text = clean_script_text(script_text)
         logger.info("已对台本进行预处理（删除空行和方括号内容）")
-    logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符")
+    logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符。")
     # 分割台本
     if short_sentences:
         logger.warning("已忽略短句模式，使用普通句子分割。")
         script_sents = split_sentences_pysbd(script_text)
     else:
         script_sents = split_sentences_pysbd(script_text)
-    logger.info(f"台本分割为 {len(script_sents)} 个句子")
+    logger.info(f"台本分割为 {len(script_sents)} 个句子。")
 
     # 读取已有字幕
     subtitle_segments = parse_subtitle_file(subtitle_path)
@@ -159,4 +158,4 @@ def align_it(script_path: str, subtitle_path: str, output_path: str,
         save_lrc(subtitles, output_path)
     else:
         save_srt(subtitles, output_path)
-    logger.info("只对齐模式完成")
+    logger.info("只对齐模式完成。")

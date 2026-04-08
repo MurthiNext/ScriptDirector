@@ -36,7 +36,9 @@ def key_error_handler(func: Callable) -> Callable:
     return wrapper
 
 def is_audio_file(path: str) -> bool:
-    """判断文件是否为音频文件"""
+    """
+    判断文件是否为音频文件。
+    """
     ext = os.path.splitext(path)[1].lower()
     if ext in AUDIO_EXTENSIONS:
         return True
