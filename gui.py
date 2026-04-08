@@ -2,11 +2,9 @@ import os
 import threading
 import queue
 import multiprocessing
-import configparser
 import tkinter as tk
 import customtkinter as ctk
 import logging
-import psutil
 from logging.handlers import QueueHandler
 from tkinter import filedialog, messagebox
 
