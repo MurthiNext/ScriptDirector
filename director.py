@@ -1,5 +1,4 @@
 import os
-import logging
 import pysbd
 import stable_whisper
 import multiprocessing
