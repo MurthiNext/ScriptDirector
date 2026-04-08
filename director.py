@@ -508,7 +508,6 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
         elif isinstance(result, tuple) and result[0] == 'result':
             subtitles = result[1]
         else:
-            # 兼容旧格式（直接是列表）
             subtitles = result
     except Exception as e:
         if p.is_alive():
