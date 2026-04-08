@@ -3,18 +3,23 @@ import configparser
 import os
 import sys
 import mimetypes
-from typing import Optional
 import multiprocessing
 import threading
 from tqdm import tqdm
+from typing import Optional, Callable
 
-from director import direct_it, PROGRESS_ALIGN_START, PROGRESS_ALIGN_END
+from director import (
+    direct_it,
+    load_config,
+    PROGRESS_ALIGN_START,
+    PROGRESS_ALIGN_END
+)
 from only_align import align_it
 
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.aac'}
 
-def exception_handler(func):
-    def wrapper(*args, **kwargs):
+def key_error_handler(func: Callable) -> Callable:
+    def wrapper(*args, **kwargs) -> Callable:
         try:
             return func(*args, **kwargs)
         except KeyError as e:
@@ -28,9 +33,15 @@ def exception_handler(func):
                 elif a.lower() == 'n':
                     click.echo('已跳过。')
                     break
-        except Exception as e:
-            click.echo(f'报错: {e}')
     return wrapper
+
+def is_audio_file(path: str) -> bool:
+    """判断文件是否为音频文件"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in AUDIO_EXTENSIONS:
+        return True
+    mime_type, _ = mimetypes.guess_type(path)
+    return mime_type is not None and mime_type.startswith('audio/')
 
 @click.group(invoke_without_command=True)
 @click.pass_context
@@ -162,15 +173,7 @@ def modify_config(key_value: str) -> None:
         conf.write(configfile)
     click.echo(f'已更新配置项 {section}.{key} = {value}')
 
-def is_audio_file(path: str) -> bool:
-    """判断文件是否为音频文件"""
-    ext = os.path.splitext(path)[1].lower()
-    if ext in AUDIO_EXTENSIONS:
-        return True
-    mime_type, _ = mimetypes.guess_type(path)
-    return mime_type is not None and mime_type.startswith('audio/')
-
-@exception_handler
+@key_error_handler
 @cli.command(name='process', short_help='通过台本文件与音频文件生成字幕文件')
 @click.argument('input_str', type=str)
 @click.option('-t', '--type', type=click.Choice(['srt', 'lrc'], case_sensitive=False),
@@ -266,17 +269,13 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     if not os.path.exists('config.ini'):
         raise click.ClickException('配置文件不存在，请先运行 init 命令。')
 
-    conf = configparser.ConfigParser()
-    conf.read('config.ini', encoding='utf-8')
-    if 'common' not in conf:
-        raise KeyError('配置文件中缺少 [common] 节')
-    common = conf['common']
-    model = common.get('model')
-    lang = common.get('lang')
-    device = common.get('device')
-    compute = common.get('compute')
+    settings = load_config('config.ini')
+    model = settings.get('model')
+    lang = settings.get('lang')
+    device = settings.get('device')
+    compute = settings.get('compute')
     if not all([model, lang, device, compute]):
-        raise ValueError('配置文件不完整，请重新运行 init 或检查 config.ini')
+        raise ValueError('配置文件不完整，请重新运行 init 命令或检查 config.ini')
 
     audio_dir = os.path.dirname(audio_path) or '.'
     if name:
@@ -330,7 +329,8 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
             compute_type=compute,
             preprocess=preprocess,
             short_sentences=shorter,
-            progress_queue=progress_queue
+            progress_queue=progress_queue,
+            verbose=False
         )
     finally:
         stop_event.set()

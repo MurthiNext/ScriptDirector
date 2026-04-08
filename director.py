@@ -2,18 +2,19 @@ import os
 import logging
 import pysbd
 import stable_whisper
-from rapidfuzz import fuzz
 import multiprocessing
 import traceback
 import time
-from typing import List, Tuple, Optional, Union, Any
-from logging.handlers import QueueHandler
 import configparser
 import json
 import re
 import psutil
+from typing import List, Tuple, Optional, Union
+from logging.handlers import QueueHandler
+from rapidfuzz import fuzz
+from faster_whisper import WhisperModel
 
-from timeline import interpolate_timestamps
+from subtitles_toolkit import interpolate_timestamps
 
 __author__ = 'MurthiNext'
 __version__ = '2.1.5 Release'
@@ -26,7 +27,6 @@ PROGRESS_ALIGN_END = 99
 PROGRESS_DONE = 100
 # 进程超时设置
 PROCESS_TIMEOUT = 3600
-
 # 编译正则表达式
 _PUNCT_SPLIT_RE = re.compile(r'(?<=[。！？…、．])\s*')
 
@@ -44,10 +44,22 @@ if not logger.handlers:
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-def load_advanced_config(config_path='config.ini'):
-    """读取 [advanced] 节的配置，返回字典，未设置的项使用默认值"""
+# 工具函数
+
+def load_config(config_path: str='config.ini') -> dict:
+    """
+    读取配置，返回字典。
+    [common]节若有未设置的项则报错。
+    [advanced]节未设置的项使用默认值。
+    """
     config = configparser.ConfigParser()
-    defaults = {
+    common = {
+        'model': None,
+        'lang': None,
+        'device': None,
+        'compute': None,
+    }
+    advanced = {
         'gap_penalty': '-10',
         'similarity_offset': '50',
         'default_duration': '5.0',
@@ -58,26 +70,36 @@ def load_advanced_config(config_path='config.ini'):
     }
     if os.path.exists(config_path):
         config.read(config_path, encoding='utf-8')
+        if config.has_section('common'):
+            for key in common.keys():
+                if config.has_option('common', key):
+                    common[key] = config.get('common', key)
+                else:
+                    raise ValueError(f"配置文件缺少 [common] 部分的 {key} 项，请检查 {config_path}")
         if config.has_section('advanced'):
-            for key, default in defaults.items():
+            for key in advanced.keys():
                 if config.has_option('advanced', key):
-                    defaults[key] = config.get('advanced', key)
+                    advanced[key] = config.get('advanced', key)
     # 转换类型
     try:
-        vad_params = json.loads(defaults['vad_parameters'])
+        vad_params = json.loads(advanced['vad_parameters'])
     except json.JSONDecodeError as e:
         logger.warning(f"解析 vad_parameters 失败，使用默认值 {{}}。错误: {e}")
         vad_params = {}
-    advanced = {
-        'gap_penalty': int(defaults['gap_penalty']),
-        'similarity_offset': int(defaults['similarity_offset']),
-        'default_duration': float(defaults['default_duration']),
-        'max_combine': int(defaults['max_combine']),
-        'beam_size': int(defaults['beam_size']),
-        'vad_filter': defaults['vad_filter'].lower() in ('true', '1', 'yes'),
+    settings = {
+        'model': common['model'],
+        'lang': common['lang'],
+        'device': common['device'],
+        'compute': common['compute'],
+        'gap_penalty': int(advanced['gap_penalty']),
+        'similarity_offset': int(advanced['similarity_offset']),
+        'default_duration': float(advanced['default_duration']),
+        'max_combine': int(advanced['max_combine']),
+        'beam_size': int(advanced['beam_size']),
+        'vad_filter': advanced['vad_filter'].lower() in ('true', '1', 'yes'),
         'vad_parameters': vad_params,
     }
-    return advanced
+    return settings
 
 def format_time_srt(seconds: float) -> str:
     millis = int((seconds - int(seconds)) * 1000)
@@ -109,6 +131,19 @@ def save_lrc(subtitles: List[Tuple[str, float, float]], output_path: str) -> Non
         f.close()
     logger.info(f"已保存 LRC 歌词到 {output_path}")
 
+def kill_process_tree(pid: int) -> None:
+    """递归终止进程及其所有子进程"""
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.terminate()
+        gone, alive = psutil.wait_procs(children, timeout=3)
+        for p in alive:
+            p.kill()
+    except psutil.NoSuchProcess:
+        pass
+
 def normalize_subtitle_text(text: str) -> str:
     """删除字幕文本中的空行和内部换行，将多行合并为一行。"""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -132,7 +167,93 @@ def split_sentences_pysbd(text: str, language: str = 'ja') -> List[str]:
         logger.debug(f"句子 {i}: {sent[:50]}..." if len(sent) > 50 else f"句子 {i}: {sent}")
     return result
 
-def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_penalty: int = -10, similarity_offset: int = 50, max_combine: int = 5, progress_queue: Optional[multiprocessing.Queue] = None) -> List[Tuple[Optional[int], Optional[Tuple[int, int]]]]:
+def split_text_by_punctuation(text: str) -> List[str]:
+    text = text.replace('\r', ' ').replace('\n', ' ')
+    parts = _PUNCT_SPLIT_RE.split(text)
+    return [p.strip() for p in parts if p.strip()]
+
+def is_punctuation_only(text: str) -> bool:
+    """判断文本是否只包含标点符号和空白"""
+    punct = set('。！？…．、，．？！；：""''（）【】《》')
+    for ch in text.strip():
+        if ch not in punct and not ch.isspace():
+            return False
+    return True
+
+def log_alignment_mapping(
+        script_sents: List[str],
+        target_sents: List[str],
+        alignment: List[Tuple[Optional[int], Optional[Union[int, Tuple[int, int]]]]],
+        name_a: str = "完整句子",
+        name_b: str = "散落的单词"
+    ) -> None:
+    """
+    记录对齐映射关系，格式：
+      完整句子 [台本编号] ↔ 索引范围 [范围] : 台本句子内容
+          散落的单词: [范围] 单词文本, ...
+    现在 alignment 中的 target 可以是整数索引或元组范围。
+    """
+    # 建立 script_idx -> 对应的 target 列表（可能是范围或单个索引）
+    script_to_target = {}
+    for s_idx, t_info in alignment:
+        if s_idx is not None and t_info is not None:
+            if isinstance(t_info, tuple):
+                # 范围
+                script_to_target.setdefault(s_idx, []).append(t_info)
+            else:
+                # 单个索引，转为范围
+                script_to_target.setdefault(s_idx, []).append((t_info, t_info))
+
+    logger.info(f"========== 对齐映射（{name_a} ↔ {name_b}） ==========")
+    output_text = '\n\n'
+    for s_idx in sorted(script_to_target.keys()):
+        ranges = sorted(script_to_target[s_idx])
+        # 合并相邻或重叠的范围
+        merged_ranges = []
+        for r in ranges:
+            if not merged_ranges:
+                merged_ranges.append(list(r))
+            else:
+                last = merged_ranges[-1]
+                if r[0] <= last[1] + 1:
+                    last[1] = max(last[1], r[1])
+                else:
+                    merged_ranges.append(list(r))
+        merged_ranges = [tuple(r) for r in merged_ranges]
+
+        idx_str_parts = []
+        for r_start, r_end in merged_ranges:
+            if r_start == r_end:
+                idx_str_parts.append(str(r_start))
+            else:
+                idx_str_parts.append(f"{r_start}-{r_end}")
+        idx_str = ", ".join(idx_str_parts)
+
+        sent_preview = script_sents[s_idx][:80] + "..." if len(script_sents[s_idx]) > 80 else script_sents[s_idx]
+        output_text += f"  {name_a} [{s_idx}] ↔ 索引 [{idx_str}] : {sent_preview}\n"
+
+        # 收集每个范围对应的单词文本
+        words_detail = []
+        for r_start, r_end in merged_ranges:
+            texts = [target_sents[i][:50] + "..." if len(target_sents[i]) > 50 else target_sents[i] for i in range(r_start, r_end+1)]
+            if r_start == r_end:
+                words_detail.append(f"[{r_start}] {texts[0]}")
+            else:
+                words_detail.append(f"[{r_start}-{r_end}] {', '.join(texts)}")
+        output_text += f"      {name_b}: {', '.join(words_detail)}\n"
+    logger.info(output_text)
+    logger.info("=" * 50)
+
+# 主干工作函数
+
+def _align_sentence_lists(
+        script_sents: List[str],
+        whisper_sents: List[str],
+        gap_penalty: int = -10,
+        similarity_offset: int = 50,
+        max_combine: int = 5,
+        progress_queue: Optional[multiprocessing.Queue] = None
+    ) -> List[Tuple[Optional[int], Optional[Tuple[int, int]]]]:
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
     该版本为重构后的增强版本，允许一个台本句子匹配连续的多个 Whisper 句子（范围），以更好地处理台本与识别结果之间的差异。
@@ -244,80 +365,16 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
     logger.info(f"对齐完成，路径长度 {len(alignment)}")
     return alignment
 
-def split_text_by_punctuation(text: str) -> List[str]:
-    text = text.replace('\r', ' ').replace('\n', ' ')
-    parts = _PUNCT_SPLIT_RE.split(text)
-    return [p.strip() for p in parts if p.strip()]
-
-def is_punctuation_only(text: str) -> bool:
-    """判断文本是否只包含标点符号和空白"""
-    punct = set('。！？…．、，．？！；：""''（）【】《》')
-    for ch in text.strip():
-        if ch not in punct and not ch.isspace():
-            return False
-    return True
-
-def log_alignment_mapping(script_sents: List[str], target_sents: List[str], alignment: List[Tuple[Optional[int], Optional[Union[int, Tuple[int, int]]]]], name_a: str = "完整句子", name_b: str = "散落的单词") -> None:
-    """
-    记录对齐映射关系，格式：
-      完整句子 [台本编号] ↔ 索引范围 [范围] : 台本句子内容
-          散落的单词: [范围] 单词文本, ...
-    现在 alignment 中的 target 可以是整数索引或元组范围。
-    """
-    # 建立 script_idx -> 对应的 target 列表（可能是范围或单个索引）
-    script_to_target = {}
-    for s_idx, t_info in alignment:
-        if s_idx is not None and t_info is not None:
-            if isinstance(t_info, tuple):
-                # 范围
-                script_to_target.setdefault(s_idx, []).append(t_info)
-            else:
-                # 单个索引，转为范围
-                script_to_target.setdefault(s_idx, []).append((t_info, t_info))
-
-    logger.info(f"========== 对齐映射（{name_a} ↔ {name_b}） ==========")
-    output_text = '\n\n'
-    for s_idx in sorted(script_to_target.keys()):
-        ranges = sorted(script_to_target[s_idx])
-        # 合并相邻或重叠的范围
-        merged_ranges = []
-        for r in ranges:
-            if not merged_ranges:
-                merged_ranges.append(list(r))
-            else:
-                last = merged_ranges[-1]
-                if r[0] <= last[1] + 1:
-                    last[1] = max(last[1], r[1])
-                else:
-                    merged_ranges.append(list(r))
-        merged_ranges = [tuple(r) for r in merged_ranges]
-
-        idx_str_parts = []
-        for r_start, r_end in merged_ranges:
-            if r_start == r_end:
-                idx_str_parts.append(str(r_start))
-            else:
-                idx_str_parts.append(f"{r_start}-{r_end}")
-        idx_str = ", ".join(idx_str_parts)
-
-        sent_preview = script_sents[s_idx][:80] + "..." if len(script_sents[s_idx]) > 80 else script_sents[s_idx]
-        output_text += f"  {name_a} [{s_idx}] ↔ 索引 [{idx_str}] : {sent_preview}\n"
-
-        # 收集每个范围对应的单词文本
-        words_detail = []
-        for r_start, r_end in merged_ranges:
-            texts = [target_sents[i][:50] + "..." if len(target_sents[i]) > 50 else target_sents[i] for i in range(r_start, r_end+1)]
-            if r_start == r_end:
-                words_detail.append(f"[{r_start}] {texts[0]}")
-            else:
-                words_detail.append(f"[{r_start}-{r_end}] {', '.join(texts)}")
-        output_text += f"      {name_b}: {', '.join(words_detail)}\n"
-    logger.info(output_text)
-    logger.info("=" * 50)
-
-def _transcribe_unified(model, audio_path: str, language: str,
-                        beam_size: int, vad_filter: bool, vad_parameters: dict,
-                        progress_queue: Optional[multiprocessing.Queue]) -> Tuple[List[Tuple[str, float, float]], float]:
+def _transcribe_unified(
+        model: WhisperModel,
+        audio_path: str,
+        language: str,
+        beam_size: int,
+        vad_filter: bool,
+        vad_parameters: dict,
+        progress_queue: Optional[multiprocessing.Queue],
+        verbose: Union[bool, None] = True
+    ) -> Tuple[List[Tuple[str, float, float]], float]:
     """统一转录：返回单词列表（word, start, end）和总时长，同时发送进度，并实时记录识别片段"""
     logger.info("开始转录音频...")
     # 定义内部进度回调
@@ -332,7 +389,8 @@ def _transcribe_unified(model, audio_path: str, language: str,
         beam_size=beam_size,
         vad_filter=vad_filter,
         vad_parameters=vad_parameters if vad_filter else None,
-        progress_callback=progress_cb
+        progress_callback=progress_cb,
+        verbose=verbose
     )
     total_duration = result.ori_dict.get('duration')
     # 收集所有单词
@@ -348,7 +406,11 @@ def _transcribe_unified(model, audio_path: str, language: str,
         progress_queue.put(PROGRESS_TRANSCRIBE_MAX)
     return all_words, total_duration
 
-def _prepare_script(script_path: str, preprocess: bool, short_sentences: bool) -> Tuple[str, List[str]]:
+def _prepare_script(
+        script_path: str,
+        preprocess: bool,
+        short_sentences: bool
+    ) -> Tuple[str, List[str]]:
     """读取并分割台本，返回原始文本和句子列表（如果短句模式，则进一步按标点拆分成短句）"""
     with open(script_path, 'r', encoding='utf-8') as f:
         script_text = f.read().strip()
@@ -364,17 +426,25 @@ def _prepare_script(script_path: str, preprocess: bool, short_sentences: bool) -
         script_sents = split_sentences_pysbd(script_text)
     return script_text, script_sents
 
-def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[str, float, float]],
-                                gap_penalty: int, similarity_offset: int, default_duration: float,
-                                max_combine: int, progress_queue: Optional[multiprocessing.Queue]) -> List[Tuple[str, float, float]]:
+def _build_subtitles_from_words(
+        script_sents: List[str],
+        all_words: List[Tuple[str, float, float]],
+        gap_penalty: int, 
+        similarity_offset: int, 
+        default_duration: float,
+        max_combine: int,
+        progress_queue: Optional[multiprocessing.Queue]
+    ) -> List[Tuple[str, float, float]]:
     """
     将台本句子与单词列表对齐，为每个句子分配时间戳。
     现在使用增强的对齐算法，允许一个台本句子匹配多个单词。
     """
+
     # 提取单词文本列表
     word_texts = [w[0] for w in all_words]
+
     # 对齐台本句子和单词序列
-    alignment = align_sentence_lists(script_sents, word_texts, gap_penalty, similarity_offset, max_combine, progress_queue=progress_queue)
+    alignment = _align_sentence_lists(script_sents, word_texts, gap_penalty, similarity_offset, max_combine, progress_queue=progress_queue)
     
     # 输出对齐日志
     log_alignment_mapping(script_sents, word_texts, alignment, "台本", "单词")
@@ -411,27 +481,21 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
     logger.info(f"生成 {len(filtered)} 条字幕（过滤后）")
     return filtered
 
-def kill_process_tree(pid):
-    """递归终止进程及其所有子进程"""
-    try:
-        parent = psutil.Process(pid)
-        children = parent.children(recursive=True)
-        for child in children:
-            child.terminate()
-        gone, alive = psutil.wait_procs(children, timeout=3)
-        for p in alive:
-            p.kill()
-    except psutil.NoSuchProcess:
-        pass
-
-def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
-                      local_model_path: str, language: str, device: str,
-                      compute_type: str, result_queue: multiprocessing.Queue,
-                      preprocess: bool = False,
-                      advanced: Optional[dict] = None,
-                      log_queue: Optional[multiprocessing.Queue] = None,
-                      progress_queue: Optional[multiprocessing.Queue] = None,
-                      short_sentences: bool = False) -> None:
+def _run_whisper_task(
+        audio_path: str,
+        script_path: str,
+        local_model_path: str,
+        language: str,
+        device: str,
+        compute_type: str,
+        result_queue: multiprocessing.Queue,
+        preprocess: bool = False,
+        settings: Optional[dict] = None,
+        log_queue: Optional[multiprocessing.Queue] = None,
+        progress_queue: Optional[multiprocessing.Queue] = None,
+        short_sentences: bool = False,
+        verbose: Union[bool, None] = True
+    ) -> None:
     """
     子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
     如果提供了 log_queue，则将日志也发送到该队列。
@@ -445,23 +509,21 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
             queue_handler = QueueHandler(log_queue)
             logger.addHandler(queue_handler)
 
-        if advanced is None:
-            advanced = {}
-        beam_size = advanced.get('beam_size', 5)
-        vad_filter = advanced.get('vad_filter', False)
-        vad_parameters = advanced.get('vad_parameters', {})
-        gap_penalty = advanced.get('gap_penalty', -10)
-        similarity_offset = advanced.get('similarity_offset', 50)
-        default_duration = advanced.get('default_duration', 5.0)
-        max_combine = advanced.get('max_combine', 5)
+        if settings is None:
+            settings = {}
+        beam_size = settings.get('beam_size', 5)
+        vad_filter = settings.get('vad_filter', False)
+        vad_parameters = settings.get('vad_parameters', {})
+        gap_penalty = settings.get('gap_penalty', -10)
+        similarity_offset = settings.get('similarity_offset', 50)
+        default_duration = settings.get('default_duration', 5.0)
+        max_combine = settings.get('max_combine', 5)
 
         logger.info(f"加载模型: {local_model_path}")
         model = stable_whisper.load_faster_whisper(local_model_path, device=device, compute_type=compute_type)
 
         # 获取单词列表
-        all_words, total_duration = _transcribe_unified(
-            model, audio_path, language, beam_size, vad_filter, vad_parameters, progress_queue
-        )
+        all_words, total_duration = _transcribe_unified(model, audio_path, language, beam_size, vad_filter, vad_parameters, progress_queue, verbose)
 
         # 准备台本句子
         _, script_sents = _prepare_script(script_path, preprocess, short_sentences)
@@ -486,22 +548,42 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
     finally:
         pass
 
-def direct_it(audio_path: str, script_path: str, output_path: str,
-              local_model_path: str, language: str = 'ja',
-              device: str = 'cuda', compute_type: str = 'float16',
-              preprocess: bool = False,
-              config_path: str = 'config.ini',
-              log_queue: Optional[multiprocessing.Queue] = None,
-              progress_queue: Optional[multiprocessing.Queue] = None,
-              short_sentences: bool = False) -> None:
-    advanced = load_advanced_config(config_path)
+def direct_it(
+        audio_path: str,
+        script_path: str,
+        output_path: str,
+        local_model_path: str,
+        language: str = 'ja',
+        device: str = 'cuda',
+        compute_type: str = 'float16',
+        preprocess: bool = False,
+        config_path: str = 'config.ini',
+        log_queue: Optional[multiprocessing.Queue] = None,
+        progress_queue: Optional[multiprocessing.Queue] = None,
+        short_sentences: bool = False,
+        verbose: Union[bool, None] = True
+    ) -> None:
+
+    settings = load_config(config_path)
 
     result_queue = multiprocessing.Queue()
     p = multiprocessing.Process(
         target=_run_whisper_task,
-        args=(audio_path, script_path, output_path, local_model_path,
-              language, device, compute_type, result_queue,
-              preprocess, advanced, log_queue, progress_queue, short_sentences)
+        args=(
+            audio_path,
+            script_path,
+            local_model_path,
+            language,
+            device,
+            compute_type,
+            result_queue,
+            preprocess,
+            settings,
+            log_queue,
+            progress_queue,
+            short_sentences,
+            verbose
+        )
     )
     p.start()
     logger.info("已启动子进程进行语音识别...")

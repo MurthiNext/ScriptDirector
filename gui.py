@@ -1,31 +1,22 @@
 import os
-import sys
 import threading
 import queue
 import multiprocessing
 import configparser
 import tkinter as tk
-from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import logging
 import psutil
 from logging.handlers import QueueHandler
+from tkinter import filedialog, messagebox
 
-from director import direct_it, load_advanced_config, logger as director_logger
+from director import (
+    direct_it,
+    load_config,
+    kill_process_tree,
+    logger as director_logger
+)
 from only_align import align_it
-
-def read_config():
-    config = configparser.ConfigParser()
-    config.read('config.ini', encoding='utf-8')
-    if 'common' not in config:
-        return None
-    common = config['common']
-    return {
-        'model': common.get('model'),
-        'lang': common.get('lang'),
-        'device': common.get('device'),
-        'compute': common.get('compute')
-    }
 
 log_queue = multiprocessing.Queue()
 progress_queue = multiprocessing.Queue()
@@ -66,23 +57,8 @@ def open_file_dialog(file_type, initialdir=''):
     root.destroy()
     return path
 
-def kill_process_tree(pid):
-    """递归终止进程及其所有子进程"""
-    try:
-        parent = psutil.Process(pid)
-        children = parent.children(recursive=True)
-        for child in children:
-            child.terminate()
-        # 等待进程结束
-        gone, alive = psutil.wait_procs(children, timeout=3)
-        for p in alive:
-            p.kill()
-    except psutil.NoSuchProcess:
-        pass
-
 def processing_thread(app):
     # 为 director 的 logger 添加一个 QueueHandler，以便主进程的日志也能进入队列
-    # 但需要避免重复添加
     for handler in director_logger.handlers:
         if isinstance(handler, QueueHandler) and handler.queue == log_queue:
             break
@@ -134,7 +110,8 @@ def processing_thread(app):
                             log_queue=log_queue,
                             preprocess=prep,
                             progress_queue=progress_queue,
-                            short_sentences=short_sentences
+                            short_sentences=short_sentences,
+                            verbose=None
                         )
                         status_queue.put(('success', output_path))
                 except Exception as e:
@@ -155,17 +132,7 @@ class App(ctk.CTk):
         self.is_processing = False
         self.stop_event = threading.Event()
 
-        # 读取配置文件默认值
-        self.config_defaults = read_config()
-        # 读取高级配置并记录日志（打印到控制台）
-        self.advanced_config = load_advanced_config()
-        print(f"[Advanced] 当前高级参数配置: gap_penalty={self.advanced_config['gap_penalty']}, "
-              f"similarity_offset={self.advanced_config['similarity_offset']}, "
-              f"default_duration={self.advanced_config['default_duration']}, "
-              f"max_combine={self.advanced_config['max_combine']}, "
-              f"beam_size={self.advanced_config['beam_size']}, "
-              f"vad_filter={self.advanced_config['vad_filter']}, "
-              f"vad_parameters={self.advanced_config['vad_parameters']}")
+        self.settings = load_config('config.ini')
 
         # 使用 grid 布局，明确控制左右比例
         self.grid_columnconfigure(0, weight=0, minsize=500)   # 左列固定最小宽度 500
@@ -318,15 +285,15 @@ class App(ctk.CTk):
         self.log_text.pack(pady=5, padx=10, fill="both", expand=True)
 
         # 从配置文件填充默认值
-        if self.config_defaults:
-            if self.config_defaults.get('model'):
-                self.model_entry.insert(0, self.config_defaults['model'])
-            if self.config_defaults.get('lang'):
-                self.lang_combo.set(self.config_defaults['lang'])
-            if self.config_defaults.get('device'):
-                self.device_combo.set(self.config_defaults['device'])
-            if self.config_defaults.get('compute'):
-                self.compute_combo.set(self.config_defaults['compute'])
+        if self.settings:
+            if self.settings.get('model'):
+                self.model_entry.insert(0, self.settings['model'])
+            if self.settings.get('lang'):
+                self.lang_combo.set(self.settings['lang'])
+            if self.settings.get('device'):
+                self.device_combo.set(self.settings['device'])
+            if self.settings.get('compute'):
+                self.compute_combo.set(self.settings['compute'])
 
         # 启动后台线程
         self.thread = threading.Thread(target=processing_thread, args=(self,), daemon=True)
@@ -420,6 +387,14 @@ class App(ctk.CTk):
         self.append_log(f"[Common] 语言代码: {language if not subtitle else '(只对齐模式，无需语言)'}")
         self.append_log(f"[Common] 设备类型: {device if not subtitle else '(只对齐模式，无需设备)'}")
         self.append_log(f"[Common] 计算类型: {compute_type if not subtitle else '(只对齐模式，无需计算类型)'}")
+        self.append_log(f"[Advanced] gap_penalty: {self.settings['gap_penalty']}")
+        self.append_log(f"[Advanced] similarity_offset: {self.settings['similarity_offset']}")
+        self.append_log(f"[Advanced] default_duration: {self.settings['default_duration']}")
+        self.append_log(f"[Advanced] max_combine: {self.settings['max_combine']}")
+        self.append_log(f"[Advanced] beam_size: {self.settings['beam_size']}")
+        self.append_log(f"[Advanced] vad_filter: {self.settings['vad_filter']}")
+        self.append_log(f"[Advanced] vad_parameters: {self.settings['vad_parameters']}")
+        self.append_log('')
         self.append_log(f"台本文件: {script}")
         if subtitle:
             self.append_log(f"已有字幕文件: {subtitle} (只对齐模式)")

@@ -1,21 +1,26 @@
-import os
-import re
+import multiprocessing
 from rapidfuzz import fuzz
 from typing import List, Tuple, Optional, Any
-import multiprocessing
 
 from director import (
     split_sentences_pysbd,
     log_alignment_mapping,
     save_srt,
     save_lrc,
-    load_advanced_config,
+    load_config,
     logger
 )
-from timeline import interpolate_timestamps
+from subtitles_toolkit import (
+    interpolate_timestamps,
+    parse_subtitle_file
+)
 
-def align_sentence_lists_legacy(script_sents: List[str], whisper_sents: List[str], 
-                                 gap_penalty: int = -10, similarity_offset: int = 50) -> List[Tuple[Optional[int], Optional[int]]]:
+def align_sentence_lists_legacy(
+        script_sents: List[str],
+        whisper_sents: List[str], 
+        gap_penalty: int = -10,
+        similarity_offset: int = 50
+    ) -> List[Tuple[Optional[int], Optional[int]]]:
     """
     旧版对齐函数，返回单个单词索引，供只对齐模式使用。
     由于不需要合并，max_combine 参数已移除。
@@ -55,9 +60,13 @@ def align_sentence_lists_legacy(script_sents: List[str], whisper_sents: List[str
     logger.info(f"对齐完成（旧版），路径长度 {len(alignment)}")
     return alignment
 
-def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_sents: List[str],
-                   whisper_segments: List[Any], default_duration: float = 5.0, max_combine: int = 5,
-                   progress_queue: Optional[multiprocessing.Queue] = None) -> List[Tuple[str, float, float]]:
+def map_timestamps(
+        alignment: List[Tuple[Optional[int], Optional[int]]],
+        script_sents: List[str],
+        whisper_segments: List[Any], 
+        default_duration: float = 5.0, 
+        max_combine: int = 5
+    ) -> List[Tuple[str, float, float]]:
     """
     原有的，按段落对齐的函数。（主函数已更换为按词对齐。）
 
@@ -93,65 +102,9 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
     for idx, start, end in interpolated:
         text = script_sents[idx]
         result.append((text, start, end))
-        # 发送对齐进度 (95% 到 100%)
-        if progress_queue is not None:
-            progress = 95 + (idx + 1) / len(script_sents) * 5
-            progress_queue.put(int(progress))
 
     logger.info(f"最终生成 {len(result)} 条字幕")
     return result
-
-def parse_srt_file(filepath: str) -> List[Tuple[str, float, float]]:
-    """解析 SRT 文件，返回 (文本, 开始时间, 结束时间) 列表"""
-    with open(filepath, 'r', encoding='utf-8') as f:
-        content = f.read().strip()
-    pattern = re.compile(
-        r'\d+\n'
-        r'(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n'
-        r'(.*?)(?:\n\n|$)', re.DOTALL
-    )
-    segments = []
-    for match in pattern.finditer(content):
-        start_str, end_str, text = match.groups()
-        start = sum(x * int(t) for x, t in zip([3600, 60, 1, 0.001], re.split('[:,]', start_str)))
-        end = sum(x * int(t) for x, t in zip([3600, 60, 1, 0.001], re.split('[:,]', end_str)))
-        text = text.replace('\n', ' ').strip()
-        segments.append((text, start, end))
-    return segments
-
-def parse_lrc_file(filepath: str) -> List[Tuple[str, float, float]]:
-    """解析 LRC 文件，返回 (文本, 开始时间, 结束时间) 列表（结束时间设为下一句的开始或默认值）"""
-    with open(filepath, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    segments = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        match = re.match(r'\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*)', line)
-        if match:
-            minutes, seconds, hundredths, text = match.groups()
-            start = int(minutes) * 60 + int(seconds) + int(hundredths) / 100
-            segments.append((text, start, 0.0))
-    # 补全结束时间
-    for i in range(len(segments) - 1):
-        _, start, _ = segments[i]
-        _, next_start, _ = segments[i+1]
-        segments[i] = (segments[i][0], start, next_start)
-    if segments:
-        last_text, last_start, _ = segments[-1]
-        segments[-1] = (last_text, last_start, last_start + 3.0)
-    return segments
-
-def parse_subtitle_file(filepath: str) -> List[Tuple[str, float, float]]:
-    """根据扩展名解析字幕文件"""
-    ext = os.path.splitext(filepath)[1].lower()
-    if ext == '.srt':
-        return parse_srt_file(filepath)
-    elif ext == '.lrc':
-        return parse_lrc_file(filepath)
-    else:
-        raise ValueError(f"不支持的字幕格式: {ext}")
 
 def align_it(script_path: str, subtitle_path: str, output_path: str,
                output_format: str = 'srt', preprocess: bool = False,
@@ -192,10 +145,10 @@ def align_it(script_path: str, subtitle_path: str, output_path: str,
     whisper_texts = [text for text, _, _ in subtitle_segments]
 
     # 读取高级配置
-    advanced = load_advanced_config(config_path)
-    gap_penalty = advanced['gap_penalty']
-    similarity_offset = advanced['similarity_offset']
-    default_duration = advanced['default_duration']
+    settings = load_config(config_path)
+    gap_penalty = settings['gap_penalty']
+    similarity_offset = settings['similarity_offset']
+    default_duration = settings['default_duration']
 
     # 对齐
     alignment = align_sentence_lists_legacy(script_sents, whisper_texts, gap_penalty, similarity_offset)
