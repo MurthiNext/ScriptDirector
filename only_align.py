@@ -1,15 +1,57 @@
 import os
 import re
 import logging
+from rapidfuzz import fuzz
 from typing import List, Tuple, Optional, Any
 import multiprocessing
 
 # 导入 director 中的相关函数和模块
 from director import (
     logger, split_sentences_pysbd, log_alignment_mapping,
-    align_sentence_lists, save_srt, save_lrc,
+    save_srt, save_lrc,
     load_advanced_config
 )
+
+def align_sentence_lists_legacy(script_sents: List[str], whisper_sents: List[str], 
+                                 gap_penalty: int = -10, similarity_offset: int = 50) -> List[Tuple[Optional[int], Optional[int]]]:
+    """
+    旧版对齐函数，返回单个单词索引，供只对齐模式使用。
+    由于不需要合并，max_combine 参数已移除。
+    """
+    n, m = len(script_sents), len(whisper_sents)
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+
+    logger.info(f"开始对齐（旧版）：台本 {n} 句，字幕 {m} 句")
+
+    for i in range(1, n + 1):
+        dp[i][0] = dp[i-1][0] + gap_penalty
+    for j in range(1, m + 1):
+        dp[0][j] = dp[0][j-1] + gap_penalty
+
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            sim_score = fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - similarity_offset
+            match_score = dp[i-1][j-1] + sim_score
+            delete = dp[i-1][j] + gap_penalty
+            insert = dp[i][j-1] + gap_penalty
+            dp[i][j] = max(match_score, delete, insert)
+
+    alignment = []
+    i, j = n, m
+    while i > 0 or j > 0:
+        if i > 0 and j > 0 and dp[i][j] == dp[i-1][j-1] + (fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - similarity_offset):
+            alignment.append((i-1, j-1))
+            i -= 1
+            j -= 1
+        elif i > 0 and dp[i][j] == dp[i-1][j] + gap_penalty:
+            alignment.append((i-1, None))
+            i -= 1
+        else:
+            alignment.append((None, j-1))
+            j -= 1
+    alignment.reverse()
+    logger.info(f"对齐完成（旧版），路径长度 {len(alignment)}")
+    return alignment
 
 def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_sents: List[str],
                    whisper_segments: List[Any], default_duration: float = 5.0, max_combine: int = 5,
@@ -209,12 +251,11 @@ def align_only(script_path: str, subtitle_path: str, output_path: str,
     gap_penalty = advanced['gap_penalty']
     similarity_offset = advanced['similarity_offset']
     default_duration = advanced['default_duration']
-    max_combine = advanced['max_combine']
 
     # 对齐
-    alignment = align_sentence_lists(script_sents, whisper_texts, gap_penalty, similarity_offset)
+    alignment = align_sentence_lists_legacy(script_sents, whisper_texts, gap_penalty, similarity_offset)
     log_alignment_mapping(script_sents, whisper_texts, alignment, "台本", "已有字幕")
-    subtitles = map_timestamps(alignment, script_sents, whisper_segments, default_duration, max_combine)
+    subtitles = map_timestamps(alignment, script_sents, whisper_segments, default_duration)
 
     # 保存结果
     if output_format == 'lrc':
