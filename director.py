@@ -262,7 +262,7 @@ def _align_sentence_lists(
     dp_mem = (n + 1) * (m + 1) * 4 / (1024 ** 2)  # 4 Bytes per int32
     match_range_mem = (n + 1) * (m + 1) * 56 / (1024 ** 2)  # 56 Bytes per cell
     logger.info(f">正在运行对齐算法(_align_sentence_lists)")
-    logger.info(f">台本句子数为n={n}，字幕单词数为m={m}，max_combine为K={max_combine}。")
+    logger.info(f">字幕单词数为m={m}，台本句子数为n={n}，max_combine为K={max_combine}。")
     logger.info(f">时间复杂度O(n*m*K)，空间复杂度O(n*m)。")
     logger.info(f">估算内存占用：DP表约为{dp_mem:.2f}MB；match_range表约为{match_range_mem:.2f}MB。")
 
