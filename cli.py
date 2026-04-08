@@ -4,11 +4,15 @@ import os
 import sys
 import mimetypes
 from typing import Optional
-from director import direct_it
-from only_align import align_only  # 新增导入
+import multiprocessing
+import threading
+from tqdm import tqdm
+
+from director import direct_it, PROGRESS_ALIGN_START, PROGRESS_ALIGN_END
+from only_align import align_it
+
 
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.aac'}
-ask_input = input
 
 def exception_handler(func):
     def wrapper(*args, **kwargs):
@@ -17,7 +21,7 @@ def exception_handler(func):
         except KeyError as e:
             click.echo(f'报错: {e}')
             while True:
-                a = ask_input('疑似配置文件出现错误，是否删除？(y/n)')
+                a = input('疑似配置文件出现错误，是否删除？(y/n)')
                 if a.lower() == 'y':
                     os.remove('config.ini')
                     click.echo('已删除配置文件。')
@@ -66,7 +70,7 @@ def init_config() -> None:
     如果配置文件已存在，会询问是否覆盖。
     """
     if os.path.exists('config.ini'):
-        overwrite = ask_input('配置文件已存在，是否覆盖？(y/n): ').lower()
+        overwrite = input('配置文件已存在，是否覆盖？(y/n): ').lower()
         if overwrite != 'y':
             click.echo('已取消初始化。')
             return
@@ -75,10 +79,10 @@ def init_config() -> None:
 
     # 获取 common 节参数
     while True:
-        model = ask_input('请输入Faster Whisper本地模型路径: ').strip()
-        lang = ask_input('请输入台本与音频所使用的语言代码: ').strip()
-        device = ask_input('请输入设备类型(cuda/cpu): ').strip()
-        compute = ask_input('请输入计算类型(float16/int8): ').strip()
+        model = input('请输入Faster Whisper本地模型路径: ').strip()
+        lang = input('请输入台本与音频所使用的语言代码: ').strip()
+        device = input('请输入设备类型(cuda/cpu): ').strip()
+        compute = input('请输入计算类型(float16/int8): ').strip()
         if model and lang and device and compute:
             break
         click.echo('配置文件不能有空项，请重新输入。')
@@ -91,13 +95,13 @@ def init_config() -> None:
 
     # 获取 advanced 节参数（可选）
     click.echo("可选高级参数设置（直接回车使用默认值）:")
-    gap_penalty = ask_input('gap_penalty (对齐惩罚值，默认 -10): ').strip()
-    similarity_offset = ask_input('similarity_offset (相似度偏移，默认 50): ').strip()
-    default_duration = ask_input('default_duration (默认字幕时长/秒，默认 5.0): ').strip()
-    max_combine = ask_input('max_combine (最大合并片段数，默认 5): ').strip()
-    beam_size = ask_input('beam_size (束搜索宽度，默认 5): ').strip()
-    vad_filter = ask_input('vad_filter (启用语音活动检测，默认 False): ').strip()
-    vad_parameters = ask_input('vad_parameters (VAD参数 JSON，默认 {}): ').strip()
+    gap_penalty = input('gap_penalty (对齐惩罚值，默认 -10): ').strip()
+    similarity_offset = input('similarity_offset (相似度偏移，默认 50): ').strip()
+    default_duration = input('default_duration (默认字幕时长/秒，默认 5.0): ').strip()
+    max_combine = input('max_combine (最大合并片段数，默认 5): ').strip()
+    beam_size = input('beam_size (束搜索宽度，默认 5): ').strip()
+    vad_filter = input('vad_filter (启用语音活动检测，默认 False): ').strip()
+    vad_parameters = input('vad_parameters (VAD参数 JSON，默认 {}): ').strip()
 
     conf['advanced'] = {}
     if gap_penalty:
@@ -247,7 +251,7 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
             base = os.path.splitext(os.path.basename(subtitle_path))[0]
         output_path = os.path.join(output_dir, f"{base}.{type}")
         # 调用 only_align.align_only
-        align_only(
+        align_it(
             script_path=script_path,
             subtitle_path=subtitle_path,
             output_path=output_path,
@@ -286,17 +290,60 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     output_filename = f"{audio_basename}.{type}"
     output_path = os.path.join(audio_dir, output_filename)
 
-    direct_it(
-        audio_path=audio_path,
-        script_path=script_path,
-        output_path=output_path,
-        local_model_path=model,
-        language=lang,
-        device=device,
-        compute_type=compute,
-        preprocess=preprocess,
-        short_sentences=shorter
-    )
+    # 进度队列和进度条（仅在听写完成后显示）
+    progress_queue = multiprocessing.Queue()
+    # 用于控制进度条显示：只在收到 >=95 的进度时创建进度条
+    progress_bar = None
+    stop_event = threading.Event()
+
+    def progress_updater():
+        nonlocal progress_bar
+        while not stop_event.is_set():
+            try:
+                p = progress_queue.get(timeout=0.5)
+                if p is None:
+                    break
+                # 只关心对齐及之后的进度（>PROGRESS_ALIGN_START）
+                if p > PROGRESS_ALIGN_START:
+                    if progress_bar is None:
+                        progress_bar = tqdm(total=PROGRESS_ALIGN_END - PROGRESS_ALIGN_START, desc="Aligning", unit="%")
+                        progress_bar.n = p - PROGRESS_ALIGN_START
+                        progress_bar.refresh()
+                    else:
+                        new_pos = p - PROGRESS_ALIGN_START
+                        if new_pos > progress_bar.n:
+                            progress_bar.n = new_pos
+                            progress_bar.refresh()
+                    if p == PROGRESS_ALIGN_END:
+                        if progress_bar:
+                            progress_bar.close()
+                        break
+            except:
+                continue
+
+    progress_thread = threading.Thread(target=progress_updater, daemon=True)
+    progress_thread.start()
+
+    try:
+        direct_it(
+            audio_path=audio_path,
+            script_path=script_path,
+            output_path=output_path,
+            local_model_path=model,
+            language=lang,
+            device=device,
+            compute_type=compute,
+            preprocess=preprocess,
+            short_sentences=shorter,
+            progress_queue=progress_queue
+        )
+    finally:
+        stop_event.set()
+        progress_queue.put(None)
+        progress_thread.join(timeout=2)
+        if progress_bar is not None and not progress_bar.disable:
+            progress_bar.close()
+
     click.echo(f'字幕已生成：{output_path}')
 
 if __name__ == '__main__':
