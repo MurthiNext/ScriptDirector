@@ -5,9 +5,12 @@ from typing import List, Tuple, Optional, Any
 import multiprocessing
 
 from director import (
-    logger, split_sentences_pysbd, log_alignment_mapping,
-    save_srt, save_lrc,
-    load_advanced_config
+    split_sentences_pysbd,
+    log_alignment_mapping,
+    save_srt,
+    save_lrc,
+    load_advanced_config,
+    logger
 )
 from timeline import interpolate_timestamps
 
@@ -157,19 +160,10 @@ def align_it(script_path: str, subtitle_path: str, output_path: str,
     只对齐模式：将台本与已有字幕文件对齐，生成新字幕。
     注意：此模式下 short_sentences 参数会被忽略，因为已有字幕不包含单词级时间戳，
     无法进行标点级分割。如果用户启用了短句模式，函数会记录警告并自动禁用。
-    参数：
-        script_path: 台本文件路径
-        subtitle_path: 已有字幕文件路径（SRT或LRC）
-        output_path: 输出文件路径
-        output_format: 输出格式（'srt' 或 'lrc'）
-        preprocess: 是否预处理台本
-        short_sentences: 是否启用短句模式（在此模式下将被忽略）
-        config_path: 配置文件路径
     """
-    # 警告：短句模式在只对齐时无效
     if short_sentences:
         logger.warning("只对齐模式下不支持短句模式（单词级时间戳），已自动禁用短句模式。")
-        short_sentences = False  # 强制禁用
+        short_sentences = False
 
     # 读取台本
     with open(script_path, 'r', encoding='utf-8') as f:
@@ -179,9 +173,8 @@ def align_it(script_path: str, subtitle_path: str, output_path: str,
         script_text = clean_script_text(script_text)
         logger.info("已对台本进行预处理（删除空行和方括号内容）")
     logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符")
-    # 分割台本（不使用短句模式，因为短句模式需要单词级时间戳）
+    # 分割台本
     if short_sentences:
-        # 虽然用户要求，但我们强制禁用
         logger.warning("已忽略短句模式，使用普通句子分割。")
         script_sents = split_sentences_pysbd(script_text)
     else:
@@ -190,7 +183,7 @@ def align_it(script_path: str, subtitle_path: str, output_path: str,
 
     # 读取已有字幕
     subtitle_segments = parse_subtitle_file(subtitle_path)
-    # 构造 whisper_segments 对象（具有 start/end 属性）
+    # 构造 whisper_segments 对象
     class Segment:
         def __init__(self, start, end):
             self.start = start

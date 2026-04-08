@@ -11,7 +11,6 @@ from tqdm import tqdm
 from director import direct_it, PROGRESS_ALIGN_START, PROGRESS_ALIGN_END
 from only_align import align_it
 
-
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.aac'}
 
 def exception_handler(func):
@@ -240,24 +239,21 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     # 只对齐模式：提供了字幕文件
     if subtitle_path:
         click.echo("检测到已有字幕文件，启用只对齐模式（不进行语音识别）")
-        # 如果用户指定了短句模式，发出警告
         if shorter:
             click.echo("警告：只对齐模式下短句模式无效，将忽略 -s/--shorter 选项。")
-        # 确定输出路径
         output_dir = os.path.dirname(subtitle_path) or '.'
         if name:
             base = name
         else:
             base = os.path.splitext(os.path.basename(subtitle_path))[0]
         output_path = os.path.join(output_dir, f"{base}.{type}")
-        # 调用 only_align.align_only
         align_it(
             script_path=script_path,
             subtitle_path=subtitle_path,
             output_path=output_path,
             output_format=type,
             preprocess=preprocess,
-            short_sentences=shorter,   # 传入但函数内部会忽略
+            short_sentences=shorter,
             config_path='config.ini'
         )
         click.echo(f'字幕已生成：{output_path}')
@@ -292,7 +288,6 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
 
     # 进度队列和进度条（仅在听写完成后显示）
     progress_queue = multiprocessing.Queue()
-    # 用于控制进度条显示：只在收到 >=95 的进度时创建进度条
     progress_bar = None
     stop_event = threading.Event()
 

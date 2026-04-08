@@ -11,7 +11,7 @@ import logging
 import psutil
 from logging.handlers import QueueHandler
 
-from director import direct_it, logger as director_logger, load_advanced_config
+from director import direct_it, load_advanced_config, logger as director_logger
 from only_align import align_it
 
 def read_config():
@@ -343,11 +343,9 @@ class App(ctk.CTk):
         if self.subtitle_entry.get().strip():
             # 有字幕文件，禁用短句模式复选框并添加提示
             self.short_sentences_check.configure(state="disabled")
-            # 如果之前是选中状态，取消选中并提示
             if self.short_sentences_var.get():
                 self.short_sentences_var.set(False)
-                # 可以在日志区域显示提示（可选）
-                # self.append_log("注意：只对齐模式下短句模式无效，已自动禁用。")
+                self.append_log("注意：只对齐模式下短句模式无效，已自动禁用。")
         else:
             # 无字幕文件，恢复短句模式复选框
             self.short_sentences_check.configure(state="normal")
@@ -372,7 +370,6 @@ class App(ctk.CTk):
         if path:
             self.subtitle_entry.delete(0, "end")
             self.subtitle_entry.insert(0, path)
-            # 触发状态更新
             self.on_subtitle_change()
 
     def browse_model(self):

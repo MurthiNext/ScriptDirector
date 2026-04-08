@@ -373,10 +373,10 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
     """
     # 提取单词文本列表
     word_texts = [w[0] for w in all_words]
-    # 对齐台本句子和单词序列（使用新的对齐函数，允许匹配范围）
+    # 对齐台本句子和单词序列
     alignment = align_sentence_lists(script_sents, word_texts, gap_penalty, similarity_offset, max_combine, progress_queue=progress_queue)
     
-    # 输出对齐日志（现在 alignment 中包含范围）
+    # 输出对齐日志
     log_alignment_mapping(script_sents, word_texts, alignment, "台本", "单词")
     
     # 构建时间映射：每个台本句子取匹配的单词范围的最小开始时间和最大结束时间
@@ -392,7 +392,7 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
             time_map[s_idx] = (start, end)
             logger.debug(f"句子 {s_idx} 匹配单词范围 {start_idx}-{end_idx}, 时间 [{start:.2f}-{end:.2f}]")
 
-    # 生成字幕（插值）
+    # 生成字幕
     interpolated = interpolate_timestamps(time_map, len(script_sents), default_duration)
     result = []
     for idx, start, end in interpolated:
@@ -458,7 +458,7 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
         logger.info(f"加载模型: {local_model_path}")
         model = stable_whisper.load_faster_whisper(local_model_path, device=device, compute_type=compute_type)
 
-        # 统一转录，获取单词列表
+        # 获取单词列表
         all_words, total_duration = _transcribe_unified(
             model, audio_path, language, beam_size, vad_filter, vad_parameters, progress_queue
         )
