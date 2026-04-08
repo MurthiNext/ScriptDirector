@@ -28,8 +28,8 @@ def read_config():
     }
 
 log_queue = multiprocessing.Queue()
+progress_queue = multiprocessing.Queue()
 status_queue = queue.Queue()
-progress_queue = multiprocessing.Queue()   # 用于接收进度 (0-100 整数)
 
 def format_log_record(record):
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
