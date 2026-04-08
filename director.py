@@ -16,7 +16,7 @@ import psutil
 from timeline import interpolate_timestamps
 
 __author__ = 'MurthiNext'
-__version__ = '2.1.5 Beta'
+__version__ = '2.1.5 Release'
 __date__ = '2026/04/08'
 
 # 进度相关常量
