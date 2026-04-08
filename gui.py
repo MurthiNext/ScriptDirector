@@ -17,36 +17,6 @@ from logging.handlers import QueueHandler
 from director import direct_it, logger as director_logger, load_advanced_config
 from only_align import align_only
 
-def load_advanced_config(config_path='config.ini'):
-    """读取 [advanced] 节的配置，返回字典，未设置的项使用默认值"""
-    config = configparser.ConfigParser()
-    defaults = {
-        'gap_penalty': '-10',
-        'similarity_offset': '50',
-        'default_duration': '5.0',
-        'max_combine': '5',
-        'beam_size': '5',
-        'vad_filter': 'False',
-        'vad_parameters': '{}',
-    }
-    if os.path.exists(config_path):
-        config.read(config_path, encoding='utf-8')
-        if config.has_section('advanced'):
-            for key, default in defaults.items():
-                if config.has_option('advanced', key):
-                    defaults[key] = config.get('advanced', key)
-    # 转换类型
-    advanced = {
-        'gap_penalty': int(defaults['gap_penalty']),
-        'similarity_offset': int(defaults['similarity_offset']),
-        'default_duration': float(defaults['default_duration']),
-        'max_combine': int(defaults['max_combine']),
-        'beam_size': int(defaults['beam_size']),
-        'vad_filter': defaults['vad_filter'].lower() in ('true', '1', 'yes'),
-        'vad_parameters': json.loads(defaults['vad_parameters']),
-    }
-    return advanced
-
 def read_config():
     config = configparser.ConfigParser()
     config.read('config.ini', encoding='utf-8')

@@ -12,7 +12,7 @@ from director import (
     load_advanced_config
 )
 
-def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], 
+def align_sentence_lists_legacy(script_sents: List[str], whisper_sents: List[str], 
                                  gap_penalty: int = -10, similarity_offset: int = 50) -> List[Tuple[Optional[int], Optional[int]]]:
     """
     旧版对齐函数，返回单个单词索引，供只对齐模式使用。
@@ -253,7 +253,7 @@ def align_only(script_path: str, subtitle_path: str, output_path: str,
     default_duration = advanced['default_duration']
 
     # 对齐
-    alignment = align_sentence_lists(script_sents, whisper_texts, gap_penalty, similarity_offset)
+    alignment = align_sentence_lists_legacy(script_sents, whisper_texts, gap_penalty, similarity_offset)
     log_alignment_mapping(script_sents, whisper_texts, alignment, "台本", "已有字幕")
     subtitles = map_timestamps(alignment, script_sents, whisper_segments, default_duration)
 

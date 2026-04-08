@@ -13,8 +13,8 @@ import json
 import re
 
 __author__ = 'MurthiNext'
-__version__ = '2.1.0 Release'
-__date__ = '2026/04/01'
+__version__ = '2.1.1 Release'
+__date__ = '2026/04/08'
 
 if os.path.isfile('log.log'):
     with open('log.log', 'w', encoding='utf-8') as wf:
@@ -37,7 +37,7 @@ def load_advanced_config(config_path='config.ini'):
         'gap_penalty': '-10',
         'similarity_offset': '50',
         'default_duration': '5.0',
-        'max_combine': '5',
+        'max_combine': '15',
         'beam_size': '5',
         'vad_filter': 'False',
         'vad_parameters': '{}',
@@ -248,7 +248,7 @@ def log_alignment_mapping(script_sents: List[str], target_sents: List[str], alig
                 script_to_target.setdefault(s_idx, []).append((t_info, t_info))
 
     logger.info(f"========== 对齐映射（{name_a} ↔ {name_b}） ==========")
-    output_text = ''
+    output_text = '\n\n'
     for s_idx in sorted(script_to_target.keys()):
         ranges = sorted(script_to_target[s_idx])
         # 合并相邻或重叠的范围
@@ -408,9 +408,6 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
                 logger.warning(f"句子 {idx} 无任何参考时间，使用默认值 0-{default_duration} 秒")
             result.append((text, start, end))
             logger.debug(f"插值句子 {idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
-        if progress_queue is not None:
-            progress = 95 + (idx + 1) / total_sents * 5
-            progress_queue.put(int(progress))
 
     # 过滤纯标点行
     filtered = []
@@ -471,7 +468,7 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
         time.sleep(0.5)
         logger.info("处理完成，结果已放回队列。")
         if progress_queue is not None:
-            progress_queue.put(100)
+            progress_queue.put(99)
 
     except Exception as e:
         error_msg = f"子进程发生错误：{str(e)}\n{traceback.format_exc()}"
@@ -526,6 +523,8 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
     else:
         save_srt(subtitles, output_path)
 
+    if progress_queue is not None:
+        progress_queue.put(100)
     logger.info("字幕文件保存完成。")
 
 if __name__ == "__main__":
@@ -537,5 +536,5 @@ if __name__ == "__main__":
         language='ja',                           # 语言代码
         device='cuda',                           # 计算设备 'cuda' 或 'cpu'
         compute_type='float16',                   # 计算类型
-        short_sentences=False                    # 启用短句模式
+        short_sentences=True                    # 启用短句模式
     )

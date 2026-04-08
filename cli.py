@@ -4,7 +4,7 @@ import os
 import sys
 import mimetypes
 from typing import Optional
-from director import direct_it, load_advanced_config
+from director import direct_it
 from only_align import align_only  # 新增导入
 
 ask_input = input
