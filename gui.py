@@ -104,12 +104,10 @@ def processing_thread(app):
                 try:
                     if subtitle_path:
                         # 只对齐模式
-                        # 确定输出路径
                         audio_dir = os.path.dirname(subtitle_path) or '.'
                         base = name if name else os.path.splitext(os.path.basename(subtitle_path))[0]
                         output_path = os.path.join(audio_dir, f"{base}.{fmt}")
-                        # 调用 only_align.align_only
-                        align_only(
+                        align_it(
                             script_path=script,
                             subtitle_path=subtitle_path,
                             output_path=output_path,
