@@ -1,16 +1,15 @@
 import os
 import re
-import logging
 from rapidfuzz import fuzz
 from typing import List, Tuple, Optional, Any
 import multiprocessing
 
-# 导入 director 中的相关函数和模块
 from director import (
     logger, split_sentences_pysbd, log_alignment_mapping,
     save_srt, save_lrc,
     load_advanced_config
 )
+from timeline import interpolate_timestamps
 
 def align_sentence_lists_legacy(script_sents: List[str], whisper_sents: List[str], 
                                  gap_penalty: int = -10, similarity_offset: int = 50) -> List[Tuple[Optional[int], Optional[int]]]:
@@ -55,7 +54,7 @@ def align_sentence_lists_legacy(script_sents: List[str], whisper_sents: List[str
 
 def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_sents: List[str],
                    whisper_segments: List[Any], default_duration: float = 5.0, max_combine: int = 5,
-                   progress_queue: Optional[multiprocessing.Queue] = None) -> List[Tuple[str, float, float]]: # 主干逻辑：对齐时间轴
+                   progress_queue: Optional[multiprocessing.Queue] = None) -> List[Tuple[str, float, float]]:
     """
     原有的，按段落对齐的函数。（主函数已更换为按词对齐。）
 
@@ -85,62 +84,15 @@ def map_timestamps(alignment: List[Tuple[Optional[int], Optional[int]]], script_
         time_map[script_idx] = (start_time, end_time)
         logger.debug(f"句子 {script_idx} 时间: {start_time:.2f} -> {end_time:.2f}")
 
-    # 第三步：为所有台本句子生成最终列表（包括未匹配的，通过插值）
+    # 第三步：使用公共插值函数
+    interpolated = interpolate_timestamps(time_map, len(script_sents), default_duration)
     result = []
-    total_sents = len(script_sents)
-    for idx, script_idx in enumerate(range(total_sents)):
-        text = script_sents[script_idx]
-        if script_idx in time_map:
-            start, end = time_map[script_idx]
-            result.append((text, start, end))
-            logger.debug(f"已匹配句子 {script_idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
-        else:
-            # 找到前后最近的已匹配句子
-            prev_idx = None
-            next_idx = None
-            for i in range(script_idx - 1, -1, -1):
-                if i in time_map:
-                    prev_idx = i
-                    break
-            for i in range(script_idx + 1, len(script_sents)):
-                if i in time_map:
-                    next_idx = i
-                    break
-
-            if prev_idx is not None and next_idx is not None:
-                prev_start, prev_end = time_map[prev_idx]
-                next_start, next_end = time_map[next_idx]
-                total_gap = next_start - prev_end
-                gap_sentences = next_idx - prev_idx - 1
-                if gap_sentences > 0:
-                    seg_duration = total_gap / (gap_sentences + 1)
-                    offset = script_idx - prev_idx
-                    start = prev_end + seg_duration * offset
-                    end = start + seg_duration
-                else:
-                    start = prev_end
-                    end = next_start
-            elif prev_idx is not None:
-                prev_start, prev_end = time_map[prev_idx]
-                duration = prev_end - prev_start
-                start = prev_end
-                end = start + duration
-            elif next_idx is not None:
-                next_start, next_end = time_map[next_idx]
-                duration = next_end - next_start
-                end = next_start
-                start = end - duration
-            else:
-                start = 0.0
-                end = default_duration
-                logger.warning("无任何参考时间，使用默认值 0-5 秒")
-
-            result.append((text, start, end))
-            logger.debug(f"插值句子 {script_idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
-
+    for idx, start, end in interpolated:
+        text = script_sents[idx]
+        result.append((text, start, end))
         # 发送对齐进度 (95% 到 100%)
         if progress_queue is not None:
-            progress = 95 + (idx + 1) / total_sents * 5
+            progress = 95 + (idx + 1) / len(script_sents) * 5
             progress_queue.put(int(progress))
 
     logger.info(f"最终生成 {len(result)} 条字幕")

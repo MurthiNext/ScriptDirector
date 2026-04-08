@@ -11,10 +11,24 @@ from logging.handlers import QueueHandler
 import configparser
 import json
 import re
+import psutil
+
+from timeline import interpolate_timestamps
 
 __author__ = 'MurthiNext'
-__version__ = '2.1.1 Release'
+__version__ = '2.1.5 Release'
 __date__ = '2026/04/08'
+
+# 进度相关常量
+PROGRESS_TRANSCRIBE_MAX = 95
+PROGRESS_ALIGN_START = 95
+PROGRESS_ALIGN_END = 99
+PROGRESS_DONE = 100
+# 进程超时设置
+PROCESS_TIMEOUT = 3600
+
+# 编译正则表达式
+_PUNCT_SPLIT_RE = re.compile(r'(?<=[。！？…、．])\s*')
 
 if os.path.isfile('log.log'):
     with open('log.log', 'w', encoding='utf-8') as wf:
@@ -49,6 +63,11 @@ def load_advanced_config(config_path='config.ini'):
                 if config.has_option('advanced', key):
                     defaults[key] = config.get('advanced', key)
     # 转换类型
+    try:
+        vad_params = json.loads(defaults['vad_parameters'])
+    except json.JSONDecodeError as e:
+        logger.warning(f"解析 vad_parameters 失败，使用默认值 {{}}。错误: {e}")
+        vad_params = {}
     advanced = {
         'gap_penalty': int(defaults['gap_penalty']),
         'similarity_offset': int(defaults['similarity_offset']),
@@ -56,7 +75,7 @@ def load_advanced_config(config_path='config.ini'):
         'max_combine': int(defaults['max_combine']),
         'beam_size': int(defaults['beam_size']),
         'vad_filter': defaults['vad_filter'].lower() in ('true', '1', 'yes'),
-        'vad_parameters': json.loads(defaults['vad_parameters']),
+        'vad_parameters': vad_params,
     }
     return advanced
 
@@ -197,16 +216,19 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
                 alignment.append((i-1, (start_idx, end_idx)))
                 logger.debug(f"匹配: 台本 {i-1} <-> Whisper 范围 [{start_idx}-{end_idx}]")
                 i -= 1
-                j = start_idx  # 跳过已匹配的单词范围
+                j = start_idx
+                continue
             elif typ == 'delete':
                 alignment.append((i-1, None))
                 logger.debug(f"台本插入: {i-1}")
                 i -= 1
+                continue
             elif typ == 'insert':
                 alignment.append((None, data))
                 logger.debug(f"Whisper 删除: {data}")
                 j -= 1
-        elif i > 0:
+                continue
+        if i > 0:
             alignment.append((i-1, None))
             i -= 1
         else:
@@ -218,7 +240,7 @@ def align_sentence_lists(script_sents: List[str], whisper_sents: List[str], gap_
 
 def split_text_by_punctuation(text: str) -> List[str]:
     text = text.replace('\r', ' ').replace('\n', ' ')
-    parts = re.split(r'(?<=[。！？…、．])\s*', text)
+    parts = _PUNCT_SPLIT_RE.split(text)
     return [p.strip() for p in parts if p.strip()]
 
 def is_punctuation_only(text: str) -> bool:
@@ -295,7 +317,7 @@ def _transcribe_unified(model, audio_path: str, language: str,
     # 定义内部进度回调
     def progress_cb(p, eta):
         if progress_queue is not None and eta > 0:
-            progress = int((p / eta) * 95)
+            progress = int((p / eta) * PROGRESS_TRANSCRIBE_MAX)
             progress_queue.put(progress)
     result = model.transcribe(
         audio_path,
@@ -317,7 +339,7 @@ def _transcribe_unified(model, audio_path: str, language: str,
         total_duration = all_words[-1][2]
     logger.info(f"识别完成，共 {len(all_words)} 个单词")
     if progress_queue is not None:
-        progress_queue.put(95)
+        progress_queue.put(PROGRESS_TRANSCRIBE_MAX)
     return all_words, total_duration
 
 def _prepare_script(script_path: str, preprocess: bool, short_sentences: bool) -> Tuple[str, List[str]]:
@@ -364,50 +386,15 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
             time_map[s_idx] = (start, end)
             logger.debug(f"句子 {s_idx} 匹配单词范围 {start_idx}-{end_idx}, 时间 [{start:.2f}-{end:.2f}]")
 
-    # 生成字幕（插值逻辑不变）
+    # 生成字幕（插值）
+    interpolated = interpolate_timestamps(time_map, len(script_sents), default_duration)
     result = []
-    total_sents = len(script_sents)
-    for idx, text in enumerate(script_sents):
-        text = normalize_subtitle_text(text)
+    for idx, start, end in interpolated:
+        text = normalize_subtitle_text(script_sents[idx])
         if not text:
             continue
-        if idx in time_map:
-            start, end = time_map[idx]
-            result.append((text, start, end))
-            logger.debug(f"已匹配句子 {idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
-        else:
-            # 插值逻辑
-            prev_idx = next((i for i in range(idx - 1, -1, -1) if i in time_map), None)
-            next_idx = next((i for i in range(idx + 1, total_sents) if i in time_map), None)
-            if prev_idx is not None and next_idx is not None:
-                prev_start, prev_end = time_map[prev_idx]
-                next_start, next_end = time_map[next_idx]
-                total_gap = next_start - prev_end
-                gap_sentences = next_idx - prev_idx - 1
-                if gap_sentences > 0:
-                    seg_duration = total_gap / (gap_sentences + 1)
-                    offset = idx - prev_idx
-                    start = prev_end + seg_duration * offset
-                    end = start + seg_duration
-                else:
-                    start = prev_end
-                    end = next_start
-            elif prev_idx is not None:
-                prev_start, prev_end = time_map[prev_idx]
-                duration = prev_end - prev_start
-                start = prev_end
-                end = start + duration
-            elif next_idx is not None:
-                next_start, next_end = time_map[next_idx]
-                duration = next_end - next_start
-                end = next_start
-                start = end - duration
-            else:
-                start = 0.0
-                end = default_duration
-                logger.warning(f"句子 {idx} 无任何参考时间，使用默认值 0-{default_duration} 秒")
-            result.append((text, start, end))
-            logger.debug(f"插值句子 {idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
+        result.append((text, start, end))
+        logger.debug(f"句子 {idx}: [{start:.2f}-{end:.2f}] {text[:30]}...")
 
     # 过滤纯标点行
     filtered = []
@@ -417,6 +404,19 @@ def _build_subtitles_from_words(script_sents: List[str], all_words: List[Tuple[s
     filtered = normalize_subtitles(filtered)
     logger.info(f"生成 {len(filtered)} 条字幕（过滤后）")
     return filtered
+
+def kill_process_tree(pid):
+    """递归终止进程及其所有子进程"""
+    try:
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for child in children:
+            child.terminate()
+        gone, alive = psutil.wait_procs(children, timeout=3)
+        for p in alive:
+            p.kill()
+    except psutil.NoSuchProcess:
+        pass
 
 def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
                       local_model_path: str, language: str, device: str,
@@ -433,6 +433,9 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
     """
     try:
         if log_queue is not None:
+            # 清除所有现有处理器，只保留 QueueHandler
+            for handler in logger.handlers[:]:
+                logger.removeHandler(handler)
             queue_handler = QueueHandler(log_queue)
             logger.addHandler(queue_handler)
 
@@ -462,17 +465,17 @@ def _run_whisper_task(audio_path: str, script_path: str, output_path: str,
             script_sents, all_words, gap_penalty, similarity_offset, default_duration, max_combine, progress_queue
         )
 
-        result_queue.put(subtitles)
+        result_queue.put(('result', subtitles))
         result_queue.close()
         result_queue.join_thread()
         time.sleep(0.5)
         logger.info("处理完成，结果已放回队列。")
         if progress_queue is not None:
-            progress_queue.put(99)
+            progress_queue.put(PROGRESS_ALIGN_END)
 
     except Exception as e:
         error_msg = f"子进程发生错误：{str(e)}\n{traceback.format_exc()}"
-        result_queue.put(error_msg)
+        result_queue.put(('error', error_msg))
         logger.error(error_msg)
     finally:
         pass
@@ -498,23 +501,28 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
     logger.info("已启动子进程进行语音识别...")
 
     try:
-        result = result_queue.get(timeout=3600)
-        if isinstance(result, str):
-            logger.error(f"子进程返回错误信息: {result}")
-            raise RuntimeError(f"语音识别失败: {result}")
+        result = result_queue.get(timeout=PROCESS_TIMEOUT)
+        if isinstance(result, tuple) and result[0] == 'error':
+            logger.error(f"子进程返回错误信息: {result[1]}")
+            raise RuntimeError(f"语音识别失败: {result[1]}")
+        elif isinstance(result, tuple) and result[0] == 'result':
+            subtitles = result[1]
+        else:
+            # 兼容旧格式（直接是列表）
+            subtitles = result
     except Exception as e:
         if p.is_alive():
             logger.error("子进程可能卡死，正在终止...")
-            p.terminate()
+            kill_process_tree(p.pid)
             p.join()
         raise RuntimeError(f"获取结果失败: {e}")
 
-    subtitles = [r for r in result if r if r[0]]
+    subtitles = [r for r in subtitles if r and r[0]]
 
     p.join(timeout=10)
     if p.is_alive():
         logger.warning("子进程未及时退出，强制终止")
-        p.terminate()
+        kill_process_tree(p.pid)
         p.join()
 
     ext = os.path.splitext(output_path)[1].lower()
@@ -524,7 +532,7 @@ def direct_it(audio_path: str, script_path: str, output_path: str,
         save_srt(subtitles, output_path)
 
     if progress_queue is not None:
-        progress_queue.put(100)
+        progress_queue.put(PROGRESS_DONE)
     logger.info("字幕文件保存完成。")
 
 if __name__ == "__main__":

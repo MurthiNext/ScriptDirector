@@ -7,6 +7,7 @@ from typing import Optional
 from director import direct_it
 from only_align import align_only  # 新增导入
 
+AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.aac'}
 ask_input = input
 
 def exception_handler(func):
@@ -158,6 +159,14 @@ def modify_config(key_value: str) -> None:
         conf.write(configfile)
     click.echo(f'已更新配置项 {section}.{key} = {value}')
 
+def is_audio_file(path: str) -> bool:
+    """判断文件是否为音频文件"""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in AUDIO_EXTENSIONS:
+        return True
+    mime_type, _ = mimetypes.guess_type(path)
+    return mime_type is not None and mime_type.startswith('audio/')
+
 @exception_handler
 @cli.command(name='process', short_help='通过台本文件与音频文件生成字幕文件')
 @click.argument('input_str', type=str)
@@ -195,6 +204,7 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     - 删除方括号内的内容（例如 [人名]、[动作说明]）
     - 去除多余空格
 
+    \b
     如果指定 -s 或 --shorter，则启用短句模式，按标点分割长句，生成更精确的字幕。
     注意：只对齐模式下短句模式无效，程序会发出警告并忽略该选项。
     """
@@ -215,11 +225,10 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
         elif ext in ('.srt', '.lrc'):
             subtitle_path = f
         else:
-            mime_type, _ = mimetypes.guess_type(f)
-            if mime_type and mime_type.startswith('audio/'):
+            if is_audio_file(f):
                 audio_path = f
             else:
-                audio_path = f
+                raise click.UsageError(f'无法识别文件类型: {f}')
 
     if not script_path:
         raise click.UsageError('未找到台本文件（.txt）')

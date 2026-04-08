@@ -8,10 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import logging
-import signal
 import psutil
-import json
-import time
 from logging.handlers import QueueHandler
 
 from director import direct_it, logger as director_logger, load_advanced_config
@@ -93,7 +90,7 @@ def processing_thread(app):
         queue_handler = QueueHandler(log_queue)
         director_logger.addHandler(queue_handler)
 
-    while True:
+    while not app.stop_event.is_set():
         try:
             msg = status_queue.get(timeout=0.5)
             if msg[0] == 'start':
@@ -158,6 +155,7 @@ class App(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.is_processing = False
+        self.stop_event = threading.Event()
 
         # 读取配置文件默认值
         self.config_defaults = read_config()
@@ -494,6 +492,7 @@ class App(ctk.CTk):
         self.after(100, self.check_queues)
 
     def on_closing(self):
+        self.stop_event.set()
         if self.is_processing:
             result = messagebox.askyesno("确认退出", "正在处理中，强制退出可能导致字幕不完整。\n确定要退出吗？")
             if not result:
