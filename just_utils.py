@@ -126,26 +126,30 @@ def interpolate_timestamps(
     根据已匹配句子的时间映射，为所有句子（包括未匹配的）插值生成时间。
     返回列表，每个元素为 (句子索引, 开始时间, 结束时间)
     """
-    logger.info(f">正在运行时间轴差值算法(interpolate_timestamps)")
-    logger.info(f">台本句子数为n={total_sents}，已匹配时间的句子数为{len(time_map)}。")
-    logger.info(f">时间复杂度O(n²)，空间复杂度O(n)。")
+    # 预处理：构建前驱和后继匹配索引数组
+    prev_match = [None] * total_sents
+    next_match = [None] * total_sents
+
+    last_match = None
+    for idx in range(total_sents):
+        if idx in time_map:
+            last_match = idx
+        prev_match[idx] = last_match
+
+    next_match_val = None
+    for idx in range(total_sents - 1, -1, -1):
+        if idx in time_map:
+            next_match_val = idx
+        next_match[idx] = next_match_val
+
     result = []
     for idx in range(total_sents):
         if idx in time_map:
             start, end = time_map[idx]
             result.append((idx, start, end))
         else:
-            # 找到前后最近的已匹配句子
-            prev_idx = None
-            next_idx = None
-            for i in range(idx - 1, -1, -1):
-                if i in time_map:
-                    prev_idx = i
-                    break
-            for i in range(idx + 1, total_sents):
-                if i in time_map:
-                    next_idx = i
-                    break
+            prev_idx = prev_match[idx]
+            next_idx = next_match[idx]
 
             if prev_idx is not None and next_idx is not None:
                 prev_start, prev_end = time_map[prev_idx]
