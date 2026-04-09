@@ -302,7 +302,7 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
                 # 仅当进入对齐阶段（p > PROGRESS_ALIGN_START）才创建进度条
                 if p > PROGRESS_ALIGN_START:
                     if progress_bar is None:
-                        progress_bar = tqdm(total=100, desc="对齐进度", unit="%")
+                        progress_bar = tqdm(total=100, desc="Aligning", unit="%")
                         progress_bar.n = 0
                         progress_bar.refresh()
                     # 将底层进度值映射到 0~100%

@@ -24,6 +24,8 @@ __date__ = '2026/04/08'
 PROGRESS_TRANSCRIBE_MAX = 80
 PROGRESS_ALIGN_START = 80
 PROGRESS_ALIGN_END = 99
+PRE_WEIGHT = 0.8
+DP_WEIGHT = 0.2
 PROGRESS_DONE = 100
 # 进程超时设置
 PROCESS_TIMEOUT = 3600
@@ -277,31 +279,57 @@ def _align_sentence_lists(
         f"    总计                    : {total_mem:7.2f} MB"
     )
 
-    # 预计算相似度矩阵，使用 numpy 数组存储以节省内存
-    # 单次匹配相似度矩阵 (n, m)
+    progress_start = PROGRESS_ALIGN_START
+    progress_range = PROGRESS_ALIGN_END - PROGRESS_ALIGN_START
+
+    # 估算预计算总操作数：sim_single 每个单元格一次，sim_multi 每个 (i,j,length) 一次
+    total_pre_ops = n * m  # sim_single
+    for i in range(n):
+        for j in range(m):
+            max_len_here = min(max_combine - 1, m - j - 1)  # 实际有效的长度数量
+            if max_len_here > 0:
+                total_pre_ops += max_len_here
+    pre_ops_done = 0
+    report_interval = max(1, total_pre_ops // 500)
+
+    # 1) match_single相似度矩阵
     sim_single = np.zeros((n, m), dtype=np.int32)
     for i in range(n):
         for j in range(m):
             sim_single[i, j] = fuzz.token_set_ratio(script_sents[i], whisper_sents[j]) - similarity_offset
+            pre_ops_done += 1
+            if progress_queue is not None and pre_ops_done % report_interval == 0:
+                ratio = pre_ops_done / total_pre_ops
+                progress = int(progress_start + PRE_WEIGHT * progress_range * ratio)
+                progress_queue.put(progress)
 
+    # 2) match_multi相似度矩阵
     max_len = max_combine - 1
-    # 多词匹配相似度，使用 -1e9 作为无效值
     sim_multi = np.full((n, m, max_len), -10**9, dtype=np.int32)
     for i in range(n):
         for j in range(m):
             for length in range(2, max_combine + 1):
                 start = j
-                end = j + length  # 不包含 end
+                end = j + length
                 if end > m:
                     break
                 combined_text = ' '.join(whisper_sents[start:end])
                 sim = fuzz.token_set_ratio(script_sents[i], combined_text) - similarity_offset
                 sim_multi[i, j, length-2] = sim
+                pre_ops_done += 1
+                if progress_queue is not None and pre_ops_done % report_interval == 0:
+                    ratio = pre_ops_done / total_pre_ops
+                    progress = int(progress_start + PRE_WEIGHT * progress_range * ratio)
+                    progress_queue.put(progress)
 
-    # DP 表和操作记录表，使用 numpy 数组以节省内存
+    # 预计算完成后，发送一次进度，进入DP阶段
+    if progress_queue is not None:
+        progress_queue.put(int(progress_start + PRE_WEIGHT * progress_range))
+
+    # DP表和回溯信息表
     dp = np.zeros((n + 1, m + 1), dtype=np.int32)
-    # 操作类型: 0=delete, 1=insert, 2=match_single, 3=match_multi
-    op = np.zeros((n + 1, m + 1), dtype=np.int8)
+    op = np.zeros((n + 1, m + 1), dtype=np.int8) # 操作类型: 0=delete, 1=insert, 2=match_single, 3=match_multi
+
     # 对于 match_multi 记录匹配的长度 (>=2) 和起始列 j_start
     match_len = np.zeros((n + 1, m + 1), dtype=np.int16)
     match_start = np.zeros((n + 1, m + 1), dtype=np.int32)
@@ -309,12 +337,16 @@ def _align_sentence_lists(
     # 初始化边界
     for i in range(1, n + 1):
         dp[i, 0] = dp[i-1, 0] + gap_penalty
-        op[i, 0] = 0  # delete
+        op[i, 0] = 0
     for j in range(1, m + 1):
         dp[0, j] = dp[0, j-1] + gap_penalty
-        op[0, j] = 1  # insert
+        op[0, j] = 1
 
-    # 填充 DP 表
+    # DP 填充阶段
+    total_cells = n * m
+    cells_done = 0
+    report_cell_interval = max(1, total_cells // 500)
+
     for i in range(1, n + 1):
         for j in range(1, m + 1):
             # 候选分数列表
@@ -324,16 +356,15 @@ def _align_sentence_lists(
             # 1) 匹配单个单词
             score_single = dp[i-1, j-1] + sim_single[i-1, j-1]
             candidates.append(score_single)
-            ops.append(2)  # match_single
+            ops.append(2)
 
-            # 2) 匹配多个单词 (长度2..max_combine)
+            # 2) 匹配多个单词
             best_multi_score = -10**9
             best_multi_len = 0
             best_multi_start = -1
             for length in range(2, max_combine + 1):
                 if j - length < 0:
                     break
-                # 从 (i-1, j-length) 转移到 (i, j)
                 start_col = j - length
                 score = dp[i-1, start_col] + sim_multi[i-1, start_col, length-2]
                 if score > best_multi_score:
@@ -342,19 +373,18 @@ def _align_sentence_lists(
                     best_multi_start = start_col
             if best_multi_len > 0:
                 candidates.append(best_multi_score)
-                ops.append(3)  # match_multi
+                ops.append(3)
 
-            # 3) 删除 (台本句子未匹配单词)
+            # 3) delete
             score_del = dp[i-1, j] + gap_penalty
             candidates.append(score_del)
-            ops.append(0)  # delete
+            ops.append(0)
 
-            # 4) 插入 (Whisper 单词未匹配台本)
+            # 4) insert
             score_ins = dp[i, j-1] + gap_penalty
             candidates.append(score_ins)
-            ops.append(1)  # insert
+            ops.append(1)
 
-            # 选择最佳
             best_idx = np.argmax(candidates)
             best_score = candidates[best_idx]
             best_op = ops[best_idx]
@@ -362,31 +392,41 @@ def _align_sentence_lists(
             dp[i, j] = best_score
             op[i, j] = best_op
 
-            if best_op == 3:  # match_multi
+            if best_op == 3:
                 match_len[i, j] = best_multi_len
                 match_start[i, j] = best_multi_start
-            elif best_op == 2:  # match_single
-                # 长度为1，起始列 j-1
+            elif best_op == 2:
                 match_len[i, j] = 1
                 match_start[i, j] = j-1
 
+            cells_done += 1
+            if progress_queue is not None and cells_done % report_cell_interval == 0:
+                dp_ratio = cells_done / total_cells
+                progress = int(progress_start + PRE_WEIGHT * progress_range + DP_WEIGHT * progress_range * dp_ratio)
+                progress_queue.put(progress)
+
+        # 每行结束后也更新一次，保证最终行能触发完成
         if progress_queue is not None:
-            progress = int(PROGRESS_ALIGN_START + (i / n) * (PROGRESS_ALIGN_END - PROGRESS_ALIGN_START))
+            dp_ratio = i / n
+            progress = int(progress_start + PRE_WEIGHT * progress_range + DP_WEIGHT * progress_range * dp_ratio)
             progress_queue.put(progress)
 
-    # 回溯构建对齐路径
+    # 对齐完成，发送最终进度
+    if progress_queue is not None:
+        progress_queue.put(PROGRESS_ALIGN_END - 1)
+
+    # 回溯
     alignment = []
     i, j = n, m
     while i > 0 or j > 0:
         if i > 0 and j > 0 and op[i, j] in (2, 3):
-            # 匹配操作 (单或多)
-            if op[i, j] == 2:  # match_single
-                start_idx = match_start[i, j]  # j-1
+            if op[i, j] == 2:
+                start_idx = match_start[i, j]
                 end_idx = start_idx
                 alignment.append((i-1, (start_idx, end_idx)))
                 i -= 1
                 j -= 1
-            else:  # match_multi
+            else:
                 length = match_len[i, j]
                 start_idx = match_start[i, j]
                 end_idx = start_idx + length - 1
@@ -394,15 +434,12 @@ def _align_sentence_lists(
                 i -= 1
                 j -= length
         elif i > 0 and (j == 0 or op[i, j] == 0):
-            # delete
             alignment.append((i-1, None))
             i -= 1
         elif j > 0 and (i == 0 or op[i, j] == 1):
-            # insert
             alignment.append((None, j-1))
             j -= 1
         else:
-            # 安全回退
             if i > 0:
                 alignment.append((i-1, None))
                 i -= 1
