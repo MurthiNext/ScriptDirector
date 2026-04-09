@@ -201,6 +201,7 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     - 扩展名为 .srt 或 .lrc 的视为已有字幕文件（启用只对齐模式）
     - 其他扩展名或 MIME 类型为 audio/ 的视为音频文件
 
+    \b
     生成的字幕文件与音频文件同名，扩展名为 .srt 或 .lrc，保存在同一目录。
     如果输入的是字幕文件（只对齐模式），则输出文件默认与字幕文件同名。
 
@@ -287,7 +288,6 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     output_filename = f"{audio_basename}.{type}"
     output_path = os.path.join(audio_dir, output_filename)
 
-    # 进度队列和进度条（仅在听写完成后显示）
     progress_queue = multiprocessing.Queue()
     progress_bar = None
     stop_event = threading.Event()
@@ -299,18 +299,25 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
                 p = progress_queue.get(timeout=0.5)
                 if p is None:
                     break
-                # 只关心对齐及之后的进度（>PROGRESS_ALIGN_START）
+                # 仅当进入对齐阶段（p > PROGRESS_ALIGN_START）才创建进度条
                 if p > PROGRESS_ALIGN_START:
                     if progress_bar is None:
-                        progress_bar = tqdm(total=PROGRESS_ALIGN_END - PROGRESS_ALIGN_START, desc="Aligning", unit="%")
-                        progress_bar.n = p - PROGRESS_ALIGN_START
+                        progress_bar = tqdm(total=100, desc="对齐进度", unit="%")
+                        progress_bar.n = 0
                         progress_bar.refresh()
-                    else:
-                        new_pos = p - PROGRESS_ALIGN_START
-                        if new_pos > progress_bar.n:
-                            progress_bar.n = new_pos
+                    # 将底层进度值映射到 0~100%
+                    # 底层范围: PROGRESS_ALIGN_START (80) -> PROGRESS_ALIGN_END (99)
+                    # 映射公式: percent = (p - 80) / (99 - 80) * 100
+                    percent = int((p - PROGRESS_ALIGN_START) / (PROGRESS_ALIGN_END - PROGRESS_ALIGN_START) * 100)
+                    percent = max(0, min(100, percent))  # 限制在 0~100
+                    if progress_bar.n < percent:
+                        progress_bar.n = percent
+                        progress_bar.refresh()
+                    # 对齐完成后强制进度条达到 100% 并关闭
+                    if p >= PROGRESS_ALIGN_END:
+                        if progress_bar and progress_bar.n < 100:
+                            progress_bar.n = 100
                             progress_bar.refresh()
-                    if p == PROGRESS_ALIGN_END:
                         if progress_bar:
                             progress_bar.close()
                         break
