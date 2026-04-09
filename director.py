@@ -10,15 +10,14 @@ import re
 import psutil
 import numpy as np
 from typing import List, Tuple, Optional, Union
-from logging.handlers import QueueHandler
 from rapidfuzz import fuzz
 from faster_whisper import WhisperModel
 
-from subtitles_toolkit import interpolate_timestamps
-from main_logger import logger
+from just_utils import interpolate_timestamps
+from main_logger import logger, setup_logging, setup_subprocess_logging
 
 __author__ = 'MurthiNext'
-__version__ = '2.2.0 Release'
+__version__ = '2.2.5 Beta'
 __date__ = '2026/04/08'
 
 # 进度相关常量
@@ -67,6 +66,9 @@ def load_config(config_path: str='config.ini') -> dict:
             for key in advanced.keys():
                 if config.has_option('advanced', key):
                     advanced[key] = config.get('advanced', key)
+    else:
+        logger.warning(f"配置文件 {config_path} 不存在，使用默认设置。")
+        return {**common, **advanced}
     # 转换类型
     try:
         vad_params = json.loads(advanced['vad_parameters'])
@@ -406,7 +408,7 @@ def _prepare_script(
     with open(script_path, 'r', encoding='utf-8') as f:
         script_text = f.read().strip()
     if preprocess:
-        from pre_process import clean_script_text
+        from just_utils import clean_script_text
         script_text = clean_script_text(script_text)
         logger.info("已对台本进行预处理（删除空行和方括号内容）。")
     logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符。")
@@ -495,12 +497,10 @@ def _run_whisper_task(
     """
     try:
         if log_queue is not None:
-            # 清除所有现有处理器，只保留 QueueHandler
-            for handler in logger.handlers[:]:
-                logger.removeHandler(handler)
-            queue_handler = QueueHandler(log_queue)
-            logger.addHandler(queue_handler)
-
+            setup_subprocess_logging(log_queue)   # 子进程模式，日志发往队列
+        else:
+            # 如果没有提供 log_queue（例如直接运行 director.py），则输出到控制台
+            setup_logging(console=True, file=False, clear_existing=True)
         if settings is None:
             settings = {}
         beam_size = settings.get('beam_size', 5)
@@ -559,6 +559,9 @@ def direct_it(
         short_sentences: bool = False,
         verbose: Union[bool, None] = True
     ) -> None:
+
+    if log_queue is None:
+        setup_logging(console=True, file=True, clear_existing=True)
 
     settings = load_config(config_path)
 
@@ -622,6 +625,7 @@ def direct_it(
     logger.info("字幕文件保存完成。")
 
 if __name__ == "__main__":
+    setup_logging(console=True, file=True)
     direct_it(
         audio_path="audio.wav",                # 音频文件路径
         script_path="script.txt",               # 台本文件路径

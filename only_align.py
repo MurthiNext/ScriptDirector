@@ -8,7 +8,7 @@ from director import (
     save_lrc,
     load_config
 )
-from subtitles_toolkit import (
+from just_utils import (
     interpolate_timestamps,
     parse_subtitle_file
 )
@@ -120,7 +120,7 @@ def align_it(script_path: str, subtitle_path: str, output_path: str,
     with open(script_path, 'r', encoding='utf-8') as f:
         script_text = f.read().strip()
     if preprocess:
-        from pre_process import clean_script_text
+        from just_utils import clean_script_text
         script_text = clean_script_text(script_text)
         logger.info("已对台本进行预处理（删除空行和方括号内容）")
     logger.info(f"台本文件读取完成，长度 {len(script_text)} 字符。")

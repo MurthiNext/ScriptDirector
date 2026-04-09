@@ -13,17 +13,18 @@ from director import (
     kill_process_tree
 )
 from only_align import align_it
+from main_logger import logger as global_logger, setup_logging
 
 log_queue = multiprocessing.Queue()
 progress_queue = multiprocessing.Queue()
 cmd_queue = queue.Queue()          # 主线程 -> 工作线程：启动命令
 result_queue = queue.Queue()       # 工作线程 -> 主线程：执行结果
 
-def format_log_record(record):
+def format_log_record(record: logging.LogRecord) -> str:
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
     return formatter.format(record)
 
-def open_file_dialog(file_type, initialdir=''):
+def open_file_dialog(file_type: str, initialdir: str = '') -> str:
     root = tk.Tk()
     root.withdraw()
     if file_type == 'audio':
@@ -54,7 +55,7 @@ def open_file_dialog(file_type, initialdir=''):
     root.destroy()
     return path
 
-def processing_thread(app):
+def processing_thread(app: 'App') -> None:
     # 日志队列的处理完全由主进程的 check_queues 负责。
     while not app.stop_event.is_set():
         try:
@@ -110,11 +111,18 @@ def processing_thread(app):
             continue
 
 class App(ctk.CTk):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.title("Script Director GUI")
         self.geometry("1400x700")
         self.resizable(False, False)
+
+        # 配置日志：输出到文件（log.log）和队列（供 GUI 显示），不输出到终端
+        setup_logging(console=False, file=False, log_queue=None, clear_existing=True)
+
+        # 启动时清空日志
+        with open('log.log', 'w', encoding='utf-8') as f:
+            pass
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -302,7 +310,7 @@ class App(ctk.CTk):
         # 绑定关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-    def on_subtitle_change(self, event=None):
+    def on_subtitle_change(self, event: tk.Event = None) -> None:
         """
         当字幕文件输入框内容变化时，调整短句模式复选框的可用性。
         """
@@ -316,21 +324,21 @@ class App(ctk.CTk):
             # 无字幕文件，恢复短句模式复选框
             self.short_sentences_check.configure(state="normal")
 
-    def browse_audio(self):
+    def browse_audio(self) -> None:
         initial_dir = os.path.dirname(self.audio_entry.get()) if self.audio_entry.get() else ''
         path = open_file_dialog('audio', initial_dir)
         if path:
             self.audio_entry.delete(0, "end")
             self.audio_entry.insert(0, path)
 
-    def browse_script(self):
+    def browse_script(self) -> None:
         initial_dir = os.path.dirname(self.script_entry.get()) if self.script_entry.get() else ''
         path = open_file_dialog('script', initial_dir)
         if path:
             self.script_entry.delete(0, "end")
             self.script_entry.insert(0, path)
 
-    def browse_subtitle(self):
+    def browse_subtitle(self) -> None:
         initial_dir = os.path.dirname(self.subtitle_entry.get()) if self.subtitle_entry.get() else ''
         path = open_file_dialog('subtitle', initial_dir)
         if path:
@@ -338,14 +346,17 @@ class App(ctk.CTk):
             self.subtitle_entry.insert(0, path)
             self.on_subtitle_change()
 
-    def browse_model(self):
+    def browse_model(self) -> None:
         initial_dir = self.model_entry.get() if self.model_entry.get() else ''
         path = open_file_dialog('model', initial_dir)
         if path:
             self.model_entry.delete(0, "end")
             self.model_entry.insert(0, path)
 
-    def start_processing(self):
+    def start_processing(self) -> None:
+        # 运行时清空日志
+        with open('log.log', 'w', encoding='utf-8') as f:
+            pass
         audio = self.audio_entry.get()
         script = self.script_entry.get()
         subtitle = self.subtitle_entry.get()
@@ -393,7 +404,7 @@ class App(ctk.CTk):
         self.append_log(f"[Advanced] beam_size: {self.settings['beam_size']}")
         self.append_log(f"[Advanced] vad_filter: {self.settings['vad_filter']}")
         self.append_log(f"[Advanced] vad_parameters: {self.settings['vad_parameters']}")
-        self.append_log('')
+        self.append_log('=============================')
         self.append_log(f"台本文件: {script}")
         if subtitle:
             self.append_log(f"已有字幕文件: {subtitle} (只对齐模式)")
@@ -414,25 +425,30 @@ class App(ctk.CTk):
             # 听写模式
             cmd_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences))
 
-    def append_log(self, msg):
+    def append_log(self, msg: str) -> None:
         self.log_text.insert("end", msg + "\n")
         self.log_text.see("end")
 
-    def check_queues(self):
+    def check_queues(self) -> None:
+        # 日志队列处理
         try:
             while True:
                 item = log_queue.get_nowait()
                 if isinstance(item, logging.LogRecord):
                     msg = format_log_record(item)
                     self.append_log(msg)
-                    with open('log.log', 'a', encoding='utf-8') as f:
-                        f.write(msg + '\n')
+                    # 直接写入文件，避免通过 logger 的 QueueHandler 再次入队
+                    try:
+                        with open('log.log', 'a', encoding='utf-8') as f:
+                            f.write(msg + '\n')
+                    except Exception:
+                        pass
                 else:
                     self.append_log(str(item))
         except queue.Empty:
             pass
 
-        # 处理进度队列
+        # 进度队列处理
         try:
             while True:
                 progress = progress_queue.get_nowait()
@@ -443,7 +459,7 @@ class App(ctk.CTk):
         except queue.Empty:
             pass
 
-        # 处理结果队列
+        # 结果队列处理
         try:
             msg = result_queue.get_nowait()
             if msg[0] == 'success':
@@ -461,7 +477,7 @@ class App(ctk.CTk):
 
         self.after(100, self.check_queues)
 
-    def on_closing(self):
+    def on_closing(self) -> None:
         self.stop_event.set()
         if self.is_processing:
             result = messagebox.askyesno("确认退出", "正在处理中，强制退出可能导致字幕不完整。\n确定要退出吗？")
@@ -482,7 +498,8 @@ class App(ctk.CTk):
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
-    from main_logger import logger as director_logger
+    from main_logger import get_logger as get_director_logger
+    director_logger = get_director_logger()
     for handler in director_logger.handlers[:]:
         if isinstance(handler, logging.StreamHandler):
             director_logger.removeHandler(handler)
