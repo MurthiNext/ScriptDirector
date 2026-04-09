@@ -6,6 +6,7 @@ import tkinter as tk
 import customtkinter as ctk
 import logging
 from tkinter import filedialog, messagebox
+from typing import Optional
 
 from director import (
     direct_it,
@@ -13,7 +14,7 @@ from director import (
     kill_process_tree
 )
 from only_align import align_it
-from main_logger import logger as global_logger, setup_logging
+from main_logger import setup_logging
 
 log_queue = multiprocessing.Queue()
 progress_queue = multiprocessing.Queue()
@@ -118,7 +119,7 @@ class App(ctk.CTk):
         self.resizable(False, False)
 
         # 配置日志：输出到文件（log.log）和队列（供 GUI 显示），不输出到终端
-        setup_logging(console=False, file=False, log_queue=None, clear_existing=True)
+        setup_logging(console=False, file=False, log_queue=log_queue, clear_existing=True)
 
         # 启动时清空日志
         with open('log.log', 'w', encoding='utf-8') as f:
@@ -135,7 +136,11 @@ class App(ctk.CTk):
         self.is_processing = False
         self.stop_event = threading.Event()
 
-        self.settings = load_config('config.ini')
+        # 初始化
+        self.create_widgets()
+        self.init_settings()
+
+    def create_widgets(self) -> None:
 
         # 使用 grid 布局，明确控制左右比例
         self.grid_columnconfigure(0, weight=0, minsize=500)   # 左列固定最小宽度 500
@@ -217,7 +222,7 @@ class App(ctk.CTk):
         self.script_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # 字幕文件（新增）
+        # 字幕文件
         self.subtitle_label = ctk.CTkLabel(self.left_frame, text="[可选]已有字幕：", anchor="e", width=100, font=self.default_font)
         self.subtitle_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
         self.subtitle_entry = ctk.CTkEntry(self.left_frame, font=self.default_font)
@@ -289,17 +294,6 @@ class App(ctk.CTk):
         self.log_text = ctk.CTkTextbox(self.right_frame, wrap="word", font=self.log_font)
         self.log_text.pack(pady=5, padx=10, fill="both", expand=True)
 
-        # 从配置文件填充默认值
-        if self.settings:
-            if self.settings.get('model'):
-                self.model_entry.insert(0, self.settings['model'])
-            if self.settings.get('lang'):
-                self.lang_combo.set(self.settings['lang'])
-            if self.settings.get('device'):
-                self.device_combo.set(self.settings['device'])
-            if self.settings.get('compute'):
-                self.compute_combo.set(self.settings['compute'])
-
         # 启动后台线程
         self.thread = threading.Thread(target=processing_thread, args=(self,), daemon=True)
         self.thread.start()
@@ -310,7 +304,19 @@ class App(ctk.CTk):
         # 绑定关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-    def on_subtitle_change(self, event: tk.Event = None) -> None:
+    def init_settings(self) -> None:
+        self.settings = load_config('config.ini')
+        if self.settings:
+            if self.settings.get('model'):
+                self.model_entry.insert(0, self.settings['model'])
+            if self.settings.get('lang'):
+                self.lang_combo.set(self.settings['lang'])
+            if self.settings.get('device'):
+                self.device_combo.set(self.settings['device'])
+            if self.settings.get('compute'):
+                self.compute_combo.set(self.settings['compute'])
+
+    def on_subtitle_change(self, event: Optional[tk.Event] = None) -> None:
         """
         当字幕文件输入框内容变化时，调整短句模式复选框的可用性。
         """
@@ -357,6 +363,7 @@ class App(ctk.CTk):
         # 运行时清空日志
         with open('log.log', 'w', encoding='utf-8') as f:
             pass
+        self.log_text.delete("1.0", "end")
         audio = self.audio_entry.get()
         script = self.script_entry.get()
         subtitle = self.subtitle_entry.get()
@@ -426,6 +433,8 @@ class App(ctk.CTk):
             cmd_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences))
 
     def append_log(self, msg: str) -> None:
+        with open('log.log', 'a', encoding='utf-8') as f:
+            f.write(msg + '\n')
         self.log_text.insert("end", msg + "\n")
         self.log_text.see("end")
 
@@ -437,7 +446,6 @@ class App(ctk.CTk):
                 if isinstance(item, logging.LogRecord):
                     msg = format_log_record(item)
                     self.append_log(msg)
-                    # 直接写入文件，避免通过 logger 的 QueueHandler 再次入队
                     try:
                         with open('log.log', 'a', encoding='utf-8') as f:
                             f.write(msg + '\n')
@@ -498,10 +506,5 @@ class App(ctk.CTk):
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
-    from main_logger import get_logger as get_director_logger
-    director_logger = get_director_logger()
-    for handler in director_logger.handlers[:]:
-        if isinstance(handler, logging.StreamHandler):
-            director_logger.removeHandler(handler)
     app = App()
     app.mainloop()

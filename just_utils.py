@@ -127,8 +127,8 @@ def interpolate_timestamps(
     返回列表，每个元素为 (句子索引, 开始时间, 结束时间)
     """
     # 预处理：构建前驱和后继匹配索引数组
-    prev_match = [None] * total_sents
-    next_match = [None] * total_sents
+    prev_match: List[Optional[int]] = [None] * total_sents
+    next_match: List[Optional[int]] = [None] * total_sents
 
     last_match = None
     for idx in range(total_sents):

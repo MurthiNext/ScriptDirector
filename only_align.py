@@ -25,7 +25,7 @@ def align_sentence_lists_legacy(
     由于不需要合并，max_combine 参数已移除。
     """
     n, m = len(script_sents), len(whisper_sents)
-    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    dp: List[List[float | int]] = [[0] * (m + 1) for _ in range(n + 1)]
 
     logger.info(f"开始对齐（旧版）：台本 {n} 句，字幕 {m} 句。")
 
@@ -104,9 +104,15 @@ def map_timestamps(
     logger.info(f"最终生成 {len(result)} 条字幕")
     return result
 
-def align_it(script_path: str, subtitle_path: str, output_path: str,
-               output_format: str = 'srt', preprocess: bool = False,
-               short_sentences: bool = False, config_path: str = 'config.ini') -> None:
+def align_it(
+        script_path: str,
+        subtitle_path: str,
+        output_path: str,
+        output_format: str = 'srt',
+        preprocess: bool = False,
+        short_sentences: bool = False,
+        config_path: str = 'config.ini'
+    ) -> None:
     """
     只对齐模式：将台本与已有字幕文件对齐，生成新字幕。
     注意：此模式下 short_sentences 参数会被忽略，因为已有字幕不包含单词级时间戳，

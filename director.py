@@ -9,9 +9,10 @@ import json
 import re
 import psutil
 import numpy as np
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple, Optional, Union, Sequence, Dict
 from rapidfuzz import fuzz
 from faster_whisper import WhisperModel
+from stable_whisper.result import WhisperResult
 
 from just_utils import interpolate_timestamps
 from main_logger import logger, setup_logging, setup_subprocess_logging
@@ -34,63 +35,61 @@ _PUNCT_SPLIT_RE = re.compile(r'(?<=[。！？…、．])\s*')
 
 # 工具函数
 
-def load_config(config_path: str='config.ini') -> dict:
+def load_config(config_path: str='config.ini') -> Dict:
     """
     读取配置，返回字典。
-    [common]节若有未设置的项则报错。
-    [advanced]节未设置的项使用默认值。
+    如果配置文件存在，则读取并覆盖默认值；如果缺少某项，则使用默认值并记录警告。
+    如果配置文件不存在，则使用全部默认值，并记录警告。
     """
     config = configparser.ConfigParser()
-    common = {
-        'model': None,
-        'lang': None,
-        'device': None,
-        'compute': None,
+    common: dict[str, str] = {
+        'model': '',
+        'lang': 'ja',
+        'device': 'cuda',
+        'compute': 'float16',
     }
-    advanced = {
-        'gap_penalty': '-10',
-        'similarity_offset': '50',
-        'default_duration': '5.0',
-        'max_combine': '20',
-        'beam_size': '5',
-        'vad_filter': 'False',
-        'vad_parameters': '{}',
+    advanced: dict[str, Union[int, float, bool, dict]] = {
+        'gap_penalty': -10,
+        'similarity_offset': 50,
+        'default_duration': 5.0,
+        'max_combine': 20,
+        'beam_size': 5,
+        'vad_filter': False,
+        'vad_parameters': {},
     }
     if os.path.exists(config_path):
         config.read(config_path, encoding='utf-8')
-        if config.has_section('common'):
+        if config.has_section('common'): # 读取 common 部分
             for key in common.keys():
+                logger.info(key)
                 if config.has_option('common', key):
                     common[key] = config.get('common', key)
                 else:
-                    raise ValueError(f"配置文件缺少 [common] 部分的 {key} 项，请检查 {config_path}")
-        if config.has_section('advanced'):
+                    logger.warning(f"配置文件 {config_path} 中 [common] 节缺少 {key} 项，使用默认值 '{common[key]}'。")
+        if config.has_section('advanced'): # 读取 advanced 部分
             for key in advanced.keys():
                 if config.has_option('advanced', key):
-                    advanced[key] = config.get('advanced', key)
+                    content =  config.get('advanced', key)
+                    if isinstance(advanced[key], int):
+                        try:
+                            advanced[key] = int(content)
+                        except ValueError:
+                            logger.warning(f"配置文件 {config_path} 中 [advanced] 节 {key} 项值 '{content}' 无法转换为整数，使用默认值 {advanced[key]}。")
+                    elif isinstance(advanced[key], float):
+                        try:
+                            advanced[key] = float(content)
+                        except ValueError:
+                            logger.warning(f"配置文件 {config_path} 中 [advanced] 节 {key} 项值 '{content}' 无法转换为浮点数，使用默认值 {advanced[key]}。")
+                    elif isinstance(advanced[key], bool):
+                        advanced[key] = content.lower() in ('true', '1', 'yes')
+                    elif isinstance(advanced[key], dict):
+                        try:
+                            advanced[key] = json.loads(content)
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"配置文件 {config_path} 中 [advanced] 节 {key} 项值 '{content}' 无法解析为 JSON，使用默认值 {{}}。错误: {e}")
     else:
-        logger.warning(f"配置文件 {config_path} 不存在，使用默认设置。")
-        return {**common, **advanced}
-    # 转换类型
-    try:
-        vad_params = json.loads(advanced['vad_parameters'])
-    except json.JSONDecodeError as e:
-        logger.warning(f"解析 vad_parameters 失败，使用默认值 {{}}。错误: {e}")
-        vad_params = {}
-    settings = {
-        'model': common['model'],
-        'lang': common['lang'],
-        'device': common['device'],
-        'compute': common['compute'],
-        'gap_penalty': int(advanced['gap_penalty']),
-        'similarity_offset': int(advanced['similarity_offset']),
-        'default_duration': float(advanced['default_duration']),
-        'max_combine': int(advanced['max_combine']),
-        'beam_size': int(advanced['beam_size']),
-        'vad_filter': advanced['vad_filter'].lower() in ('true', '1', 'yes'),
-        'vad_parameters': vad_params,
-    }
-    return settings
+        logger.warning(f"配置文件 {config_path} 不存在，全部使用默认设置。")
+    return {**common, **advanced}
 
 def format_time_srt(seconds: float) -> str:
     millis = int((seconds - int(seconds)) * 1000)
@@ -120,7 +119,7 @@ def save_lrc(subtitles: List[Tuple[str, float, float]], output_path: str) -> Non
             f.write(f"{format_time_lrc(start)} {text}\n")
     logger.info(f"已保存 LRC 歌词到 {output_path}")
 
-def kill_process_tree(pid: int) -> None:
+def kill_process_tree(pid: Optional[int]) -> None:
     """
     归终止进程及其所有子进程。
     """
@@ -176,7 +175,7 @@ def is_punctuation_only(text: str) -> bool:
 def log_alignment_mapping(
         script_sents: List[str],
         target_sents: List[str],
-        alignment: List[Tuple[Optional[int], Optional[Union[int, Tuple[int, int]]]]],
+        alignment: Sequence[Tuple[Optional[int], Optional[Union[Tuple[int, int], int]]]],
         name_a: str = "完整句子",
         name_b: str = "散落的单词"
     ) -> None:
@@ -242,7 +241,7 @@ def _align_sentence_lists(
         similarity_offset: int = 50,
         max_combine: int = 5,
         progress_queue: Optional[multiprocessing.Queue] = None
-) -> List[Tuple[Optional[int], Optional[Tuple[int, int]]]]:
+    ) -> List[Tuple[Optional[int], Optional[Tuple[int, int]]]]:
     """
     使用 Needleman-Wunsch 风格的对齐算法，对齐两个句子列表。
     该版本为重构后的增强版本，允许一个台本句子匹配连续的多个 Whisper 句子（范围），以更好地处理台本与识别结果之间的差异。
@@ -457,9 +456,9 @@ def _transcribe_unified(
         language: str,
         beam_size: int,
         vad_filter: bool,
-        vad_parameters: dict,
+        vad_parameters: Dict,
         progress_queue: Optional[multiprocessing.Queue],
-        verbose: Union[bool, None] = True
+        verbose: Optional[bool] = True
     ) -> Tuple[List[Tuple[str, float, float]], float]:
     """
     统一转录：返回单词列表（word, start, end）和总时长，同时发送进度，并实时记录识别片段。
@@ -469,24 +468,30 @@ def _transcribe_unified(
         if progress_queue is not None and eta > 0:
             progress = int((p / eta) * PROGRESS_TRANSCRIBE_MAX)
             progress_queue.put(progress)
-    result = model.transcribe(
+    # Stable Whisper为Faster Whisper重新封装了transcribe函数，新增了progress_callback与verbose参数，此处忽略类型检查。
+    # 真正的transcribe函数位于stable_whisper.whisper_word_level.faster_whisper中。
+    result: WhisperResult = model.transcribe(
         audio_path,
         language=language,
         word_timestamps=True,
         beam_size=beam_size,
         vad_filter=vad_filter,
         vad_parameters=vad_parameters if vad_filter else None,
-        progress_callback=progress_cb,
-        verbose=verbose
+        progress_callback=progress_cb, # type: ignore
+        verbose=verbose # type: ignore
     )
-    total_duration = result.ori_dict.get('duration')
+    total_duration = result.ori_dict.get('duration', 0.0)
+    if not isinstance(total_duration, (int, float)):
+        total_duration = 0.0
+    else:
+        total_duration = float(total_duration)
     # 收集所有单词
     all_words = []
     for seg in result.segments:
         if seg.words:
             for w in seg.words:
-                all_words.append((w.word.strip(), w.start, w.end))
-    if total_duration is None and all_words:
+                all_words.append((w.word.strip(), w.start, w.end)) # type: ignore
+    if total_duration <= 0 and all_words:
         total_duration = all_words[-1][2]
     if progress_queue is not None:
         progress_queue.put(PROGRESS_TRANSCRIBE_MAX)
@@ -584,7 +589,7 @@ def _run_whisper_task(
         log_queue: Optional[multiprocessing.Queue] = None,
         progress_queue: Optional[multiprocessing.Queue] = None,
         short_sentences: bool = False,
-        verbose: Union[bool, None] = True
+        verbose: Optional[bool] = True
     ) -> None:
     """
     子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
@@ -652,7 +657,7 @@ def direct_it(
         log_queue: Optional[multiprocessing.Queue] = None,
         progress_queue: Optional[multiprocessing.Queue] = None,
         short_sentences: bool = False,
-        verbose: Union[bool, None] = True
+        verbose: Optional[bool] = True
     ) -> None:
 
     if log_queue is None:

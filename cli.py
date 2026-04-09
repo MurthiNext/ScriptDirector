@@ -6,7 +6,7 @@ import mimetypes
 import multiprocessing
 import threading
 from tqdm import tqdm
-from typing import Optional, Callable
+from typing import Optional, Callable, Any
 
 from director import (
     direct_it,
@@ -15,11 +15,12 @@ from director import (
     PROGRESS_ALIGN_END
 )
 from only_align import align_it
+from main_logger import setup_logging
 
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.aac'}
 
 def key_error_handler(func: Callable) -> Callable:
-    def wrapper(*args, **kwargs) -> Callable:
+    def wrapper(*args, **kwargs) -> Any:
         try:
             return func(*args, **kwargs)
         except KeyError as e:
@@ -127,7 +128,7 @@ def init_config() -> None:
     if beam_size:
         conf['advanced']['beam_size'] = beam_size
     if vad_filter:
-        conf['advanced']['vad_filter'] = vad_filter.lower() in ('true', '1', 'yes')
+        conf['advanced']['vad_filter'] = str(vad_filter.lower() in ('true', '1', 'yes'))
     if vad_parameters:
         conf['advanced']['vad_parameters'] = vad_parameters
 
@@ -217,6 +218,8 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     如果指定 -s 或 --shorter，则启用短句模式，按标点分割长句，生成更精确的字幕。
     注意：只对齐模式下短句模式无效，程序会发出警告并忽略该选项。
     """
+    setup_logging(console=True, file=True)
+
     files = [f.strip() for f in input_str.split(',')]
     if len(files) != 2:
         raise click.UsageError('输入参数必须包含两个文件路径，用逗号分隔。')
@@ -273,10 +276,10 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
         raise click.ClickException('配置文件不存在，请先运行 init 命令。')
 
     settings = load_config('config.ini')
-    model = settings.get('model')
-    lang = settings.get('lang')
-    device = settings.get('device')
-    compute = settings.get('compute')
+    model = settings['model']
+    lang = settings['lang']
+    device = settings['device']
+    compute = settings['compute']
     if not all([model, lang, device, compute]):
         raise ValueError('配置文件不完整，请重新运行 init 命令或检查 config.ini')
 
