@@ -195,8 +195,7 @@ def log_alignment_mapping(
                 # 单个索引，转为范围
                 script_to_target.setdefault(s_idx, []).append((t_info, t_info))
 
-    logger.info(f"========== 对齐映射（{name_a} ↔ {name_b}） ==========")
-    output_text = '\n\n'
+    output_text = ''
     for s_idx in sorted(script_to_target.keys()):
         ranges = sorted(script_to_target[s_idx])
         # 合并相邻或重叠的范围
@@ -232,8 +231,7 @@ def log_alignment_mapping(
             else:
                 words_detail.append(f"[{r_start}-{r_end}] {', '.join(texts)}")
         output_text += f"      {name_b}: {', '.join(words_detail)}\n"
-    logger.info(output_text)
-    logger.info("=" * 50)
+    logger.info(f"\n========== 对齐映射（{name_a} ↔ {name_b}） ==========\n\n"+output_text+"\n" + "=" * 50)
 
 def _align_sentence_lists(
         script_sents: List[str],
@@ -253,102 +251,165 @@ def _align_sentence_lists(
     whisper_range 是一个元组 (start_idx, end_idx)，表示连续的一段单词索引。
     """
     n, m = len(script_sents), len(whisper_sents)
-    
-    dp = np.zeros((n + 1, m + 1), dtype=np.int32) # numpy DP表
-    match_range = [[None] * (m + 1) for _ in range(n + 1)] # 记录匹配的单词范围，用于回溯
 
     # 估算内存开销
-    dp_mem = (n + 1) * (m + 1) * 4 / (1024 ** 2)  # 4 Bytes per int32
-    match_range_mem = (n + 1) * (m + 1) * 56 / (1024 ** 2)  # 56 Bytes per cell
-    logger.info(f">正在运行对齐算法(_align_sentence_lists)")
-    logger.info(f">字幕单词数为m={m}，台本句子数为n={n}，max_combine为K={max_combine}。")
-    logger.info(f">时间复杂度O(m*n*K)，空间复杂度O(m*n)。")
-    logger.info(f">估算内存占用：DP表约为{dp_mem:.2f}MB；match_range表约为{match_range_mem:.2f}MB。")
+    max_len = max_combine - 1  # 多词匹配预计算的长度维度
+    sim_single_mem = n * m * 4 / (1024 ** 2)
+    sim_multi_mem = n * m * max_len * 4 / (1024 ** 2)
+    dp_mem = (n + 1) * (m + 1) * 4 / (1024 ** 2)
+    op_mem = (n + 1) * (m + 1) * 1 / (1024 ** 2)
+    match_len_mem = (n + 1) * (m + 1) * 2 / (1024 ** 2)
+    match_start_mem = (n + 1) * (m + 1) * 4 / (1024 ** 2)
+    total_mem = (sim_single_mem + sim_multi_mem + dp_mem + op_mem + match_len_mem + match_start_mem)
+
+    logger.info(
+        f"\n>>> 正在运行对齐算法(_align_sentence_lists)\n"
+        f"    字幕单词数 m = {m}，台本句子数 n = {n}，max_combine K = {max_combine}\n"
+        f"    时间复杂度 O(m·n·K)，空间复杂度 O(m·n·K)（预计算）+ O(m·n)（DP表）\n"
+        f"    ─────── 内存估算 ───────\n"
+        f"    sim_single (n×m)        : {sim_single_mem:7.2f} MB\n"
+        f"    sim_multi (n×m×(K-1))   : {sim_multi_mem:7.2f} MB\n"
+        f"    dp表 (int32)            : {dp_mem:7.2f} MB\n"
+        f"    op表 (int8)             : {op_mem:7.2f} MB\n"
+        f"    match_len表 (int16)     : {match_len_mem:7.2f} MB\n"
+        f"    match_start表 (int32)   : {match_start_mem:7.2f} MB\n"
+        f"    ─────────────────────────\n"
+        f"    总计                    : {total_mem:7.2f} MB"
+    )
+
+    # 预计算相似度矩阵，使用 numpy 数组存储以节省内存
+    # 单次匹配相似度矩阵 (n, m)
+    sim_single = np.zeros((n, m), dtype=np.int32)
+    for i in range(n):
+        for j in range(m):
+            sim_single[i, j] = fuzz.token_set_ratio(script_sents[i], whisper_sents[j]) - similarity_offset
+
+    max_len = max_combine - 1
+    # 多词匹配相似度，使用 -1e9 作为无效值
+    sim_multi = np.full((n, m, max_len), -10**9, dtype=np.int32)
+    for i in range(n):
+        for j in range(m):
+            for length in range(2, max_combine + 1):
+                start = j
+                end = j + length  # 不包含 end
+                if end > m:
+                    break
+                combined_text = ' '.join(whisper_sents[start:end])
+                sim = fuzz.token_set_ratio(script_sents[i], combined_text) - similarity_offset
+                sim_multi[i, j, length-2] = sim
+
+    # DP 表和操作记录表，使用 numpy 数组以节省内存
+    dp = np.zeros((n + 1, m + 1), dtype=np.int32)
+    # 操作类型: 0=delete, 1=insert, 2=match_single, 3=match_multi
+    op = np.zeros((n + 1, m + 1), dtype=np.int8)
+    # 对于 match_multi 记录匹配的长度 (>=2) 和起始列 j_start
+    match_len = np.zeros((n + 1, m + 1), dtype=np.int16)
+    match_start = np.zeros((n + 1, m + 1), dtype=np.int32)
 
     # 初始化边界
     for i in range(1, n + 1):
         dp[i, 0] = dp[i-1, 0] + gap_penalty
-        match_range[i][0] = ('delete', i-1)
+        op[i, 0] = 0  # delete
     for j in range(1, m + 1):
         dp[0, j] = dp[0, j-1] + gap_penalty
-        match_range[0][j] = ('insert', j-1)
+        op[0, j] = 1  # insert
 
     # 填充 DP 表
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            # 1. 考虑匹配一个单词
-            sim_single = fuzz.token_set_ratio(script_sents[i-1], whisper_sents[j-1]) - similarity_offset
-            match_single = dp[i-1, j-1] + sim_single
-            best_score = match_single
-            best_range = (j-1, j-1)
-            best_type = 'match_single'
+            # 候选分数列表
+            candidates = []
+            ops = []
 
-            # 2. 考虑匹配连续多个单词（最多 max_combine 个）
-            max_len = min(max_combine, j)
-            for length in range(2, max_len + 1):
-                start = j - length
-                combined_text = ' '.join(whisper_sents[start:j])
-                sim = fuzz.token_set_ratio(script_sents[i-1], combined_text) - similarity_offset
-                score = dp[i-1, start] + sim
-                if score > best_score:
-                    best_score = score
-                    best_range = (start, j-1)
-                    best_type = 'match_multi'
+            # 1) 匹配单个单词
+            score_single = dp[i-1, j-1] + sim_single[i-1, j-1]
+            candidates.append(score_single)
+            ops.append(2)  # match_single
 
-            # 3. 删除（台本句子未匹配任何单词）
-            delete = dp[i-1, j] + gap_penalty
-            if delete > best_score:
-                best_score = delete
-                best_type = 'delete'
-                best_range = None
+            # 2) 匹配多个单词 (长度2..max_combine)
+            best_multi_score = -10**9
+            best_multi_len = 0
+            best_multi_start = -1
+            for length in range(2, max_combine + 1):
+                if j - length < 0:
+                    break
+                # 从 (i-1, j-length) 转移到 (i, j)
+                start_col = j - length
+                score = dp[i-1, start_col] + sim_multi[i-1, start_col, length-2]
+                if score > best_multi_score:
+                    best_multi_score = score
+                    best_multi_len = length
+                    best_multi_start = start_col
+            if best_multi_len > 0:
+                candidates.append(best_multi_score)
+                ops.append(3)  # match_multi
 
-            # 4. 插入（Whisper 单词未匹配任何台本句子）
-            insert = dp[i, j-1] + gap_penalty
-            if insert > best_score:
-                best_score = insert
-                best_type = 'insert'
-                best_range = None
+            # 3) 删除 (台本句子未匹配单词)
+            score_del = dp[i-1, j] + gap_penalty
+            candidates.append(score_del)
+            ops.append(0)  # delete
+
+            # 4) 插入 (Whisper 单词未匹配台本)
+            score_ins = dp[i, j-1] + gap_penalty
+            candidates.append(score_ins)
+            ops.append(1)  # insert
+
+            # 选择最佳
+            best_idx = np.argmax(candidates)
+            best_score = candidates[best_idx]
+            best_op = ops[best_idx]
 
             dp[i, j] = best_score
-            if best_type == 'match_single':
-                match_range[i][j] = ('match', (j-1, j-1))
-            elif best_type == 'match_multi':
-                match_range[i][j] = ('match', best_range)
-            elif best_type == 'delete':
-                match_range[i][j] = ('delete', i-1)
-            else:  # insert
-                match_range[i][j] = ('insert', j-1)
+            op[i, j] = best_op
+
+            if best_op == 3:  # match_multi
+                match_len[i, j] = best_multi_len
+                match_start[i, j] = best_multi_start
+            elif best_op == 2:  # match_single
+                # 长度为1，起始列 j-1
+                match_len[i, j] = 1
+                match_start[i, j] = j-1
 
         if progress_queue is not None:
             progress = int(PROGRESS_ALIGN_START + (i / n) * (PROGRESS_ALIGN_END - PROGRESS_ALIGN_START))
             progress_queue.put(progress)
 
-    # 回溯
+    # 回溯构建对齐路径
     alignment = []
     i, j = n, m
     while i > 0 or j > 0:
-        if i > 0 and j > 0 and match_range[i][j] is not None:
-            typ, data = match_range[i][j]
-            if typ == 'match':
-                start_idx, end_idx = data
+        if i > 0 and j > 0 and op[i, j] in (2, 3):
+            # 匹配操作 (单或多)
+            if op[i, j] == 2:  # match_single
+                start_idx = match_start[i, j]  # j-1
+                end_idx = start_idx
                 alignment.append((i-1, (start_idx, end_idx)))
                 i -= 1
-                j = start_idx
-                continue
-            elif typ == 'delete':
-                alignment.append((i-1, None))
-                i -= 1
-                continue
-            elif typ == 'insert':
-                alignment.append((None, data))
                 j -= 1
-                continue
-        if i > 0:
+            else:  # match_multi
+                length = match_len[i, j]
+                start_idx = match_start[i, j]
+                end_idx = start_idx + length - 1
+                alignment.append((i-1, (start_idx, end_idx)))
+                i -= 1
+                j -= length
+        elif i > 0 and (j == 0 or op[i, j] == 0):
+            # delete
             alignment.append((i-1, None))
             i -= 1
-        else:
+        elif j > 0 and (i == 0 or op[i, j] == 1):
+            # insert
             alignment.append((None, j-1))
             j -= 1
+        else:
+            # 安全回退
+            if i > 0:
+                alignment.append((i-1, None))
+                i -= 1
+            elif j > 0:
+                alignment.append((None, j-1))
+                j -= 1
+
     alignment.reverse()
     logger.info(f"对齐完成，路径长度 {len(alignment)}")
     return alignment
@@ -497,8 +558,7 @@ def _run_whisper_task(
         if log_queue is not None:
             setup_subprocess_logging(log_queue)   # 子进程模式，日志发往队列
         else:
-            # 如果没有提供 log_queue（例如直接运行 director.py），则输出到控制台
-            setup_logging(console=True, file=False, clear_existing=True)
+            setup_logging(console=True, file=True, clear_existing=True) # 直接运行模式，日志输出到控制台与文件
         if settings is None:
             settings = {}
         beam_size = settings.get('beam_size', 5)
