@@ -109,7 +109,6 @@ def save_srt(subtitles: List[Tuple[str, float, float]], output_path: str) -> Non
             f.write(f"{idx}\n")
             f.write(f"{format_time_srt(start)} --> {format_time_srt(end)}\n")
             f.write(f"{text}\n\n")
-        f.close()
     logger.info(f"已保存 SRT 字幕到 {output_path}")
 
 def save_lrc(subtitles: List[Tuple[str, float, float]], output_path: str) -> None:
@@ -117,7 +116,6 @@ def save_lrc(subtitles: List[Tuple[str, float, float]], output_path: str) -> Non
     with open(output_path, 'w', encoding='utf-8') as f:
         for text, start, _ in subtitles:
             f.write(f"{format_time_lrc(start)} {text}\n")
-        f.close()
     logger.info(f"已保存 LRC 歌词到 {output_path}")
 
 def kill_process_tree(pid: int) -> None:
