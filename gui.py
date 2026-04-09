@@ -482,5 +482,9 @@ class App(ctk.CTk):
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
+    from main_logger import logger as director_logger
+    for handler in director_logger.handlers[:]:
+        if isinstance(handler, logging.StreamHandler):
+            director_logger.removeHandler(handler)
     app = App()
     app.mainloop()

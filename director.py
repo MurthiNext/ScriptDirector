@@ -1,5 +1,4 @@
 import os
-import logging
 import pysbd
 import stable_whisper
 import multiprocessing
@@ -19,7 +18,7 @@ from subtitles_toolkit import interpolate_timestamps
 from main_logger import logger
 
 __author__ = 'MurthiNext'
-__version__ = '2.2.0 Beta'
+__version__ = '2.2.0 Release'
 __date__ = '2026/04/08'
 
 # 进度相关常量
@@ -262,8 +261,8 @@ def _align_sentence_lists(
     dp_mem = (n + 1) * (m + 1) * 4 / (1024 ** 2)  # 4 Bytes per int32
     match_range_mem = (n + 1) * (m + 1) * 56 / (1024 ** 2)  # 56 Bytes per cell
     logger.info(f">正在运行对齐算法(_align_sentence_lists)")
-    logger.info(f">台本句子数为n={n}，字幕句子数为m={m}，max_combine为K={max_combine}。")
-    logger.info(f">时间复杂度O(n*m*K)，空间复杂度O(n*m)。")
+    logger.info(f">字幕单词数为m={m}，台本句子数为n={n}，max_combine为K={max_combine}。")
+    logger.info(f">时间复杂度O(m*n*K)，空间复杂度O(m*n)。")
     logger.info(f">估算内存占用：DP表约为{dp_mem:.2f}MB；match_range表约为{match_range_mem:.2f}MB。")
 
     # 初始化边界
