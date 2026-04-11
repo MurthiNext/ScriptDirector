@@ -136,12 +136,6 @@ class App(ctk.CTk):
         self.is_processing = False
         self.stop_event = threading.Event()
 
-        # 初始化
-        self.create_widgets()
-        self.init_settings()
-
-    def create_widgets(self) -> None:
-
         # 使用 grid 布局，明确控制左右比例
         self.grid_columnconfigure(0, weight=0, minsize=500)   # 左列固定最小宽度 500
         self.grid_columnconfigure(1, weight=1)                # 右列可扩展
@@ -304,7 +298,6 @@ class App(ctk.CTk):
         # 绑定关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-    def init_settings(self) -> None:
         self.settings = load_config('config.ini')
         if self.settings:
             if self.settings.get('model'):
