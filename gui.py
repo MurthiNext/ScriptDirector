@@ -61,23 +61,23 @@ def processing_thread(app: 'App') -> None:
             if msg[0] == 'start':
                 # 根据消息长度判断模式：长度为 11 是听写模式，长度为 12 是只对齐模式。
                 if len(msg) == 11:  # 听写模式
-                    (_, audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences) = msg
+                    (_, audio, script, name, output_format, preprocess, model_path, language, device, compute_type, short_sentences) = msg
                     subtitle_path = None
                 else:  # 只对齐模式（长度为12）
-                    (_, audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences, subtitle_path) = msg
+                    (_, audio, script, name, output_format, preprocess, model_path, language, device, compute_type, short_sentences, subtitle_path) = msg
 
                 try:
                     if subtitle_path:
                         # 只对齐模式
                         audio_dir = os.path.dirname(subtitle_path) or '.'
                         base = name if name else os.path.splitext(os.path.basename(subtitle_path))[0]
-                        output_path = os.path.join(audio_dir, f"{base}.{fmt}")
+                        output_path = os.path.join(audio_dir, f"{base}.{output_format}")
                         align_it(
                             script_path=script,
                             subtitle_path=subtitle_path,
                             output_path=output_path,
-                            output_format=fmt,
-                            preprocess=prep,
+                            output_format=output_format,
+                            preprocess=preprocess,
                             short_sentences=short_sentences,
                             config_path='config.ini'
                         )
@@ -86,7 +86,7 @@ def processing_thread(app: 'App') -> None:
                         # 听写模式（原有逻辑）
                         audio_dir = os.path.dirname(audio) or '.'
                         base = name if name else os.path.splitext(os.path.basename(audio))[0]
-                        output_path = os.path.join(audio_dir, f"{base}.{fmt}")
+                        output_path = os.path.join(audio_dir, f"{base}.{output_format}")
 
                         direct_it(
                             audio_path=audio,
@@ -97,7 +97,7 @@ def processing_thread(app: 'App') -> None:
                             device=device,
                             compute_type=compute_type,
                             log_queue=log_queue,
-                            preprocess=prep,
+                            preprocess=preprocess,
                             progress_queue=progress_queue,
                             short_sentences=short_sentences,
                             verbose=None
@@ -358,8 +358,8 @@ class App(ctk.CTk):
         script = self.script_entry.get()
         subtitle = self.subtitle_entry.get()
         name = self.name_entry.get()
-        fmt = self.type_menu.get()
-        prep = self.preprocess_var.get()
+        output_format = self.type_menu.get()
+        preprocess = self.preprocess_var.get()
         model_path = self.model_entry.get()
         language = self.lang_combo.get()
         device = self.device_combo.get()
@@ -408,8 +408,8 @@ class App(ctk.CTk):
         else:
             self.append_log(f"音频文件: {audio}")
         self.append_log(f"输出名称: {name if name else '(自动生成)'}")
-        self.append_log(f"输出格式: {fmt}")
-        self.append_log(f"预处理台本: {prep}")
+        self.append_log(f"输出格式: {output_format}")
+        self.append_log(f"预处理台本: {preprocess}")
         self.append_log(f"短句模式: {short_sentences}")
         self.append_log("=============================")
 
@@ -417,10 +417,10 @@ class App(ctk.CTk):
         # 根据是否有字幕文件决定命令格式
         if subtitle:
             # 只对齐模式：传递字幕文件路径
-            cmd_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences, subtitle))
+            cmd_queue.put(('start', audio, script, name, output_format, preprocess, model_path, language, device, compute_type, short_sentences, subtitle))
         else:
             # 听写模式
-            cmd_queue.put(('start', audio, script, name, fmt, prep, model_path, language, device, compute_type, short_sentences))
+            cmd_queue.put(('start', audio, script, name, output_format, preprocess, model_path, language, device, compute_type, short_sentences))
 
     def append_log(self, msg: str) -> None:
         with open('log.log', 'a', encoding='utf-8') as f:
