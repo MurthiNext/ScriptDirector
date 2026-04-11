@@ -1,7 +1,7 @@
 # Script Director 台本转字幕
 <div align=left>
    <img src="https://img.shields.io/github/v/release/MurthiNext/ScriptDirector">
-   <img src="https://img.shields.io/badge/python-3.8%2B-blue">
+   <img src="https://img.shields.io/badge/python-3.9%2B-blue">
    <img src="https://img.shields.io/github/license/MurthiNext/ScriptDirector">
    <img src="https://img.shields.io/github/downloads/MurthiNext/ScriptDirector/total">
    <img src="https://img.shields.io/github/stars/MurthiNext/ScriptDirector">
@@ -25,7 +25,7 @@
 ## 安装
 
 ### 依赖
-- Python 3.8+
+- Python 3.9+
 - NVIDIA CUDA Toolkit 12.0+ （若使用CUDA计算）
 - 第三方Python库：`stable-ts`， `faster-whisper`, `psutil`, `pysbd`, `rapidfuzz`, `click`, `customtkinter`, `tqdm`
 
