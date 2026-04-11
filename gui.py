@@ -11,7 +11,7 @@ from typing import Optional
 from director import direct_it
 from just_utils import load_config, kill_process_tree
 from only_align import align_it
-from main_logger import setup_logging
+from main_logger import setup_logging, logger
 
 log_queue = multiprocessing.Queue()
 progress_queue = multiprocessing.Queue()
@@ -107,6 +107,32 @@ def processing_thread(app: 'App') -> None:
                     result_queue.put(('error', str(e)))
         except queue.Empty:
             continue
+
+class ToolTip:
+    """简单的悬浮提示框，用于显示帮助信息"""
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.widget.bind('<Enter>', self.enter)
+        self.widget.bind('<Leave>', self.leave)
+
+    def enter(self, event: Optional[tk.Event] = None) -> None:
+        x, y, _, _ = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 25
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                         background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                         font=("Microsoft YaHei", 10))
+        label.pack()
+
+    def leave(self, event: Optional[tk.Event] = None) -> None:
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
 
 class App(ctk.CTk):
     def __init__(self) -> None:
@@ -213,13 +239,31 @@ class App(ctk.CTk):
         self.script_btn.grid(row=row, column=2, padx=5, pady=5)
         row += 1
 
-        # 字幕文件
-        self.subtitle_label = ctk.CTkLabel(self.left_frame, text="[可选]已有字幕：", anchor="e", width=100, font=self.default_font)
-        self.subtitle_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
-        self.subtitle_entry = ctk.CTkEntry(self.left_frame, font=self.default_font)
+        # 标签 Frame
+        subtitle_label_frame = ctk.CTkFrame(self.left_frame, fg_color="transparent")
+        subtitle_label_frame.grid(row=row, column=0, padx=5, pady=5, sticky="e")
+        # 问号标签
+        self.help_icon = ctk.CTkLabel(subtitle_label_frame, text="❔", font=self.default_font, cursor="hand2", width=20)
+        self.help_icon.pack(side="left", padx=(0, 5))
+        # 文字标签
+        self.subtitle_label = ctk.CTkLabel(subtitle_label_frame, text="已有字幕：", anchor="e", font=self.default_font)
+        self.subtitle_label.pack(side="left")
+        # 输入框和按钮
+        self.subtitle_entry = ctk.CTkEntry(self.left_frame, font=self.default_font, placeholder_text="除非使用只对齐模式，该项目选填")
         self.subtitle_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
         self.subtitle_btn = ctk.CTkButton(self.left_frame, text="浏览", width=80, font=self.button_font, command=self.browse_subtitle)
         self.subtitle_btn.grid(row=row, column=2, padx=5, pady=5)
+
+        # 添加 Tooltip
+        help_text = (
+            "只对齐模式使用方法：\n"
+            "1. 在「已有字幕」中选择一个 SRT 或 LRC 文件\n"
+            "2. 选择台本文件\n"
+            "3. 点击「开始处理」\n"
+            "程序会将台本句子与已有字幕的时间轴对齐，生成新的字幕文件。\n"
+            "注意：此模式无需音频文件和语音识别模型。"
+        )
+        ToolTip(self.help_icon, help_text)
         row += 1
 
         # 输出名称
@@ -389,30 +433,29 @@ class App(ctk.CTk):
         self.progress_text.configure(text="0%")
 
         # 打印配置信息到日志
-        self.append_log("========== 当前配置 ==========")
-        self.append_log(f"[Common] 模型路径: {model_path if not subtitle else '(只对齐模式，无需模型)'}")
-        self.append_log(f"[Common] 语言代码: {language if not subtitle else '(只对齐模式，无需语言)'}")
-        self.append_log(f"[Common] 设备类型: {device if not subtitle else '(只对齐模式，无需设备)'}")
-        self.append_log(f"[Common] 计算类型: {compute_type if not subtitle else '(只对齐模式，无需计算类型)'}")
-        self.append_log(f"[Advanced] gap_penalty: {self.settings['gap_penalty']}")
-        self.append_log(f"[Advanced] similarity_offset: {self.settings['similarity_offset']}")
-        self.append_log(f"[Advanced] default_duration: {self.settings['default_duration']}")
-        self.append_log(f"[Advanced] max_combine: {self.settings['max_combine']}")
-        self.append_log(f"[Advanced] beam_size: {self.settings['beam_size']}")
-        self.append_log(f"[Advanced] vad_filter: {self.settings['vad_filter']}")
-        self.append_log(f"[Advanced] vad_parameters: {self.settings['vad_parameters']}")
-        self.append_log('=============================')
-        self.append_log(f"台本文件: {script}")
-        if subtitle:
-            self.append_log(f"已有字幕文件: {subtitle} (只对齐模式)")
-        else:
-            self.append_log(f"音频文件: {audio}")
-        self.append_log(f"输出名称: {name if name else '(自动生成)'}")
-        self.append_log(f"输出格式: {output_format}")
-        self.append_log(f"预处理台本: {preprocess}")
-        self.append_log(f"短句模式: {short_sentences}")
-        self.append_log("=============================")
-
+        logger.info(
+f"""
+========== 当前配置 ==========
+[Common] model: {model_path if not subtitle else '(只对齐模式，无需模型)'}
+[Common] lang: {language if not subtitle else '(只对齐模式，无需语言)'}
+[Common] device: {device if not subtitle else '(只对齐模式，无需设备)'}
+[Common] compute: {compute_type if not subtitle else '(只对齐模式，无需计算类型)'}
+[Advanced] gap_penalty: {self.settings['gap_penalty']}
+[Advanced] similarity_offset: {self.settings['similarity_offset']}
+[Advanced] default_duration: {self.settings['default_duration']}
+[Advanced] max_combine: {self.settings['max_combine']}
+[Advanced] beam_size: {self.settings['beam_size']}
+[Advanced] vad_filter: {self.settings['vad_filter']}
+[Advanced] vad_parameters: {self.settings['vad_parameters']}
+=============================
+台本文件： {script}
+{f"已有字幕文件： {subtitle}(只对齐模式)" if subtitle else f"音频文件： {audio}"}
+输出名称： {name if name else '(自动生成)'}
+输出格式： {output_format}
+预处理台本： {preprocess}
+短句模式： {short_sentences}
+============================="""
+        )
         self.is_processing = True
         # 根据是否有字幕文件决定命令格式
         if subtitle:
@@ -423,8 +466,6 @@ class App(ctk.CTk):
             cmd_queue.put(('start', audio, script, name, output_format, preprocess, model_path, language, device, compute_type, short_sentences))
 
     def append_log(self, msg: str) -> None:
-        with open('log.log', 'a', encoding='utf-8') as f:
-            f.write(msg + '\n')
         self.log_text.insert("end", msg + "\n")
         self.log_text.see("end")
 
