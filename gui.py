@@ -8,11 +8,8 @@ import logging
 from tkinter import filedialog, messagebox
 from typing import Optional
 
-from director import (
-    direct_it,
-    load_config,
-    kill_process_tree
-)
+from director import direct_it
+from just_utils import load_config, kill_process_tree
 from only_align import align_it
 from main_logger import setup_logging
 

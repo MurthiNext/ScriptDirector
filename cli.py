@@ -10,11 +10,10 @@ from typing import Optional, Callable, Any
 
 from director import (
     direct_it,
-    load_config,
     PROGRESS_ALIGN_START,
     PROGRESS_ALIGN_END
 )
-from only_align import align_it
+from only_align import align_it, load_config
 from main_logger import setup_logging
 
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.aac'}
