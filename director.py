@@ -319,7 +319,7 @@ def _transcribe_unified(
         if progress_queue is not None and eta > 0:
             progress = int((p / eta) * PROGRESS_TRANSCRIBE_MAX)
             progress_queue.put(progress)
-    # Stable Whisper为Faster Whisper重新封装了transcribe函数，新增了progress_callback与verbose参数，此处忽略类型检查。
+    # Stable Whisper为Faster Whisper重新封装了transcribe函数，新增了progress_callback与verbose参数。
     # 真正的transcribe函数位于stable_whisper.whisper_word_level.faster_whisper中。
     result: WhisperResult = model.transcribe(
         audio_path,
@@ -328,8 +328,8 @@ def _transcribe_unified(
         beam_size=beam_size,
         vad_filter=vad_filter,
         vad_parameters=vad_parameters if vad_filter else None,
-        progress_callback=progress_cb, # type: ignore
-        verbose=verbose # type: ignore
+        progress_callback=progress_cb,
+        verbose=verbose
     )
     total_duration = result.ori_dict.get('duration', 0.0)
     if not isinstance(total_duration, (int, float)):
@@ -341,7 +341,7 @@ def _transcribe_unified(
     for seg in result.segments:
         if seg.words:
             for w in seg.words:
-                all_words.append((w.word.strip(), w.start, w.end)) # type: ignore
+                all_words.append((w.word.strip(), w.start, w.end))
     if total_duration <= 0 and all_words:
         total_duration = all_words[-1][2]
     if progress_queue is not None:

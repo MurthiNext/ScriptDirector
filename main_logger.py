@@ -1,5 +1,5 @@
 import logging
-from multiprocessing import Queue
+import multiprocessing
 from logging.handlers import QueueHandler
 
 # 单例 logger
@@ -45,7 +45,7 @@ def setup_logging(
         logger.addHandler(qh)
     return logger
 
-def setup_subprocess_logging(log_queue: Queue) -> logging.Logger:
+def setup_subprocess_logging(log_queue: multiprocessing.Queue) -> logging.Logger:
     """
     子进程专用配置：只添加 QueueHandler，将日志发回主进程。
     """
