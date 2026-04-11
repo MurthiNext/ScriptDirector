@@ -19,7 +19,7 @@ from main_logger import logger, setup_logging, setup_subprocess_logging
 
 __author__ = 'MurthiNext'
 __version__ = '2.2.5 Beta'
-__date__ = '2026/04/08'
+__date__ = '2026/04/09'
 
 # 进度相关常量
 PROGRESS_TRANSCRIBE_MAX = 80
@@ -61,16 +61,17 @@ def load_config(config_path: str='config.ini') -> Dict:
         config.read(config_path, encoding='utf-8')
         if config.has_section('common'): # 读取 common 部分
             for key in common.keys():
-                logger.info(key)
                 if config.has_option('common', key):
                     common[key] = config.get('common', key)
                 else:
                     logger.warning(f"配置文件 {config_path} 中 [common] 节缺少 {key} 项，使用默认值 '{common[key]}'。")
+        else:
+            logger.warning(f"配置文件 {config_path} 中缺少 [common] 节，请确认无误。")
         if config.has_section('advanced'): # 读取 advanced 部分
             for key in advanced.keys():
                 if config.has_option('advanced', key):
                     content =  config.get('advanced', key)
-                    if isinstance(advanced[key], int):
+                    if isinstance(advanced[key], int) and not isinstance(advanced[key], bool): # int==bool的来了
                         try:
                             advanced[key] = int(content)
                         except ValueError:
@@ -87,6 +88,10 @@ def load_config(config_path: str='config.ini') -> Dict:
                             advanced[key] = json.loads(content)
                         except json.JSONDecodeError as e:
                             logger.warning(f"配置文件 {config_path} 中 [advanced] 节 {key} 项值 '{content}' 无法解析为 JSON，使用默认值 {{}}。错误: {e}")
+                else:
+                    logger.info(f"配置文件 {config_path} 中 [advanced] 节缺少 {key} 项，使用默认值 '{advanced[key]}'。")
+        else:
+            logger.info(f"配置文件 {config_path} 中缺少 [advanced] 节，使用默认配置。")
     else:
         logger.warning(f"配置文件 {config_path} 不存在，全部使用默认设置。")
     return {**common, **advanced}
@@ -121,7 +126,7 @@ def save_lrc(subtitles: List[Tuple[str, float, float]], output_path: str) -> Non
 
 def kill_process_tree(pid: Optional[int]) -> None:
     """
-    归终止进程及其所有子进程。
+    递归终止进程及其所有子进程。
     """
     try:
         parent = psutil.Process(pid)
@@ -304,6 +309,7 @@ def _align_sentence_lists(
 
     # 2) match_multi相似度矩阵
     max_len = max_combine - 1
+    # 使用-1e9作为无效值
     sim_multi = np.full((n, m, max_len), -10**9, dtype=np.int32)
     for i in range(n):
         for j in range(m):
@@ -735,5 +741,5 @@ if __name__ == "__main__":
         device='cuda',                           # 计算设备 'cuda' 或 'cpu'
         compute_type='float16',                   # 计算类型
         short_sentences=True,                    # 启用短句模式
-        verbose=False
+        verbose=False                           # 终端输出样式
     )
