@@ -22,8 +22,8 @@ from just_utils import (
 from main_logger import logger, setup_logging, setup_subprocess_logging
 
 __author__ = 'MurthiNext'
-__version__ = '2.2.5 Release'
-__date__ = '2026/04/11'
+__version__ = '2.3.0 Beta'
+__date__ = '2026/04/12'
 
 # 进度相关常量
 PROGRESS_TRANSCRIBE_MAX = 80
