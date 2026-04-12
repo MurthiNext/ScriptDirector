@@ -25,8 +25,8 @@
 ## 安装
 
 ### 依赖
-- Python 3.9+
-- NVIDIA CUDA Toolkit 12.0+ （若使用 CUDA 计算）
+- Python 3.9+, 3.12.10-
+- NVIDIA CUDA Toolkit 12.9 （若使用 CUDA 计算）
 - 第三方 Python 库（见 `requirements.txt`）
 
 ### 安装步骤
