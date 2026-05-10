@@ -27,7 +27,7 @@ def key_error_handler(func: Callable) -> Callable:
             while True:
                 a = input('疑似配置文件出现错误，是否删除？(y/n)')
                 if a.lower() == 'y':
-                    os.remove('config.ini')
+                    os.remove(os.path.abspath('config.ini'))
                     click.echo('已删除配置文件。')
                     break
                 elif a.lower() == 'n':
@@ -81,7 +81,8 @@ def init_config() -> None:
 
     如果配置文件已存在，会询问是否覆盖。
     """
-    if os.path.exists('config.ini'):
+    config_path = os.path.abspath('config.ini')
+    if os.path.exists(config_path):
         overwrite = input('配置文件已存在，是否覆盖？(y/n): ').lower()
         if overwrite != 'y':
             click.echo('已取消初始化。')
@@ -131,7 +132,7 @@ def init_config() -> None:
     if vad_parameters:
         conf['advanced']['vad_parameters'] = vad_parameters
 
-    with open('config.ini', 'w', encoding='utf-8') as configfile:
+    with open(config_path, 'w', encoding='utf-8') as configfile:
         conf.write(configfile)
     click.echo('配置文件已保存。')
 
@@ -148,7 +149,8 @@ def modify_config(key_value: str) -> None:
 
     可修改的配置项有common与advanced节，详见已经初始化的config.ini。
     """
-    if not os.path.exists('config.ini'):
+    config_path = os.path.abspath('config.ini')
+    if not os.path.exists(config_path):
         click.echo('错误：配置文件不存在，请先运行 init 命令。')
         sys.exit(1)
     if '=' not in key_value:
@@ -162,7 +164,7 @@ def modify_config(key_value: str) -> None:
         sys.exit(1)
 
     conf = configparser.ConfigParser()
-    conf.read('config.ini', encoding='utf-8')
+    conf.read(config_path, encoding='utf-8')
 
     # 判断属于哪个节（默认 common）
     advanced_keys = ['gap_penalty', 'similarity_offset', 'default_duration', 'max_combine', 'beam_size', 'vad_filter', 'vad_parameters']
@@ -171,7 +173,7 @@ def modify_config(key_value: str) -> None:
         conf[section] = {}
     conf[section][key] = value
 
-    with open('config.ini', 'w', encoding='utf-8') as configfile:
+    with open(config_path, 'w', encoding='utf-8') as configfile:
         conf.write(configfile)
     click.echo(f'已更新配置项 {section}.{key} = {value}')
 
@@ -223,11 +225,12 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     if len(files) != 2:
         raise click.UsageError('输入参数必须包含两个文件路径，用逗号分隔。')
 
-    # 识别文件类型
+    # 识别文件类型（同时转为绝对路径）
     script_path = None
     audio_path = None
     subtitle_path = None
     for f in files:
+        f = os.path.abspath(f)
         if not os.path.isfile(f):
             raise click.FileError(f, f'文件不存在：{f}')
         ext = os.path.splitext(f)[1].lower()
@@ -244,12 +247,14 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     if not script_path:
         raise click.UsageError('未找到台本文件（.txt）')
 
+    config_path = os.path.abspath('config.ini')
+
     # 只对齐模式：提供了字幕文件
     if subtitle_path:
         click.echo("检测到已有字幕文件，启用只对齐模式（不进行语音识别）")
         if shorter:
             click.echo("警告：只对齐模式下短句模式无效，将忽略 -s/--shorter 选项。")
-        output_dir = os.path.dirname(subtitle_path) or '.'
+        output_dir = os.path.dirname(subtitle_path)
         if name:
             base = name
         else:
@@ -262,7 +267,7 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
             output_format=type,
             preprocess=preprocess,
             short_sentences=shorter,
-            config_path='config.ini'
+            config_path=config_path
         )
         click.echo(f'字幕已生成：{output_path}')
         return
@@ -270,11 +275,11 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     # 否则走原有流程（音频+台本）
     if not audio_path:
         raise click.UsageError('未找到音频文件或已有字幕文件')
-    
-    if not os.path.exists('config.ini'):
+
+    if not os.path.exists(config_path):
         raise click.ClickException('配置文件不存在，请先运行 init 命令。')
 
-    settings = load_config('config.ini')
+    settings = load_config(config_path)
     model = settings['model']
     lang = settings['lang']
     device = settings['device']
@@ -282,7 +287,7 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     if not all([model, lang, device, compute]):
         raise ValueError('配置文件不完整，请重新运行 init 命令或检查 config.ini')
 
-    audio_dir = os.path.dirname(audio_path) or '.'
+    audio_dir = os.path.dirname(audio_path)
     if name:
         audio_basename = name
     else:
