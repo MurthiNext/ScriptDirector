@@ -1,7 +1,6 @@
 import stable_whisper
 import multiprocessing
 import traceback
-import time
 import pysbd
 import re
 import os
@@ -429,29 +428,29 @@ def _build_subtitles_from_words(
 
 def _run_whisper_task(
         audio_path: str,
-        script_path: str,
         local_model_path: str,
         language: str,
         device: str,
         compute_type: str,
         result_queue: multiprocessing.Queue,
-        preprocess: bool = False,
+        script_queue: multiprocessing.Queue,
         settings: Optional[dict] = None,
         log_queue: Optional[multiprocessing.Queue] = None,
         progress_queue: Optional[multiprocessing.Queue] = None,
-        short_sentences: bool = False,
         verbose: Optional[bool] = True
     ) -> None:
     """
-    子进程执行的任务：加载模型、识别、对齐、生成字幕列表，并将结果放入队列。
-    如果提供了 log_queue，则将日志也发送到该队列。
-    如果提供了 progress_queue，则发送进度（0-100 整数）
+    子进程执行的任务：加载模型、转录音频、接收台本句子、对齐生成字幕。
+    通过双向 IPC 与 direct_it 通信：
+    1. 转录完成后发送 ('transcript', (all_words, total_duration))
+    2. 等待 direct_it 发送回台本句子列表
+    3. 执行对齐并返回 ('result', subtitles)
     """
     try:
         if log_queue is not None:
-            setup_subprocess_logging(log_queue)   # 子进程模式，日志发往队列
+            setup_subprocess_logging(log_queue)
         else:
-            setup_logging(console=True, file=True, clear_existing=True) # 直接运行模式，日志输出到控制台与文件
+            setup_logging(console=True, file=True, clear_existing=True)
         if settings is None:
             settings = {}
         beam_size = settings.get('beam_size', 5)
@@ -466,34 +465,33 @@ def _run_whisper_task(
         model = stable_whisper.load_faster_whisper(local_model_path, device=device, compute_type=compute_type)
         logger.info(f'模型加载完成：{local_model_path}')
 
-        # 获取单词列表
         logger.info("开始转录音频并获取单词列表。")
-        all_words, total_duration = _transcribe_unified(model, audio_path, language, beam_size, vad_filter, vad_parameters, progress_queue, verbose)
+        all_words, total_duration = _transcribe_unified(
+            model, audio_path, language, beam_size, vad_filter, vad_parameters, progress_queue, verbose
+        )
         logger.info(f"转录完成，获取到 {len(all_words)} 个单词，总时长 {total_duration:.2f} 秒。")
 
-        # 准备台本句子列表
-        _, script_sents = _prepare_script(script_path, preprocess, short_sentences)
-        logger.info(f"台本准备完成，获取到 {len(script_sents)} 个句子。")
+        # 发送转录结果，等待 direct_it 发回台本句子
+        result_queue.put(('transcript', (all_words, total_duration)))
+        logger.info("转录数据已发送，等待台本句子...")
 
-        # 生成字幕（使用增强的对齐，允许匹配范围）
-        logger.info("开始对齐台本句子与单词列表并生成字幕。")
+        script_sents = script_queue.get()
+        logger.info(f"接收到台本句子，共 {len(script_sents)} 句，开始对齐。")
+
+        # 在子进程中执行对齐（保持UI响应）
         subtitles = _build_subtitles_from_words(
             script_sents, all_words, gap_penalty, similarity_offset, default_duration, max_combine, progress_queue
         )
+
         result_queue.put(('result', subtitles))
-        result_queue.close()
-        result_queue.join_thread()
-        logger.info("处理完成，结果已放回队列，正在结束子进程。")
-        time.sleep(0.5)
         if progress_queue is not None:
             progress_queue.put(PROGRESS_ALIGN_END)
+        logger.info("处理完成，结果已放回队列，正在结束子进程。")
 
     except Exception as e:
         error_msg = f"子进程发生错误：{str(e)}\n{traceback.format_exc()}"
         result_queue.put(('error', error_msg))
         logger.error(error_msg)
-    finally:
-        pass
 
 def direct_it(
         audio_path: str,
@@ -513,57 +511,86 @@ def direct_it(
     """
     隔离 Faster Whisper / Stable Whisper 的进程，只做结果处理。
     """
+    audio_path = os.path.abspath(audio_path)
+    script_path = os.path.abspath(script_path)
+    output_path = os.path.abspath(output_path)
+    config_path = os.path.abspath(config_path)
 
     if log_queue is None:
         setup_logging(console=True, file=True, clear_existing=True)
 
     settings = load_config(config_path)
 
+    script_queue = multiprocessing.Queue()
     result_queue = multiprocessing.Queue()
     p = multiprocessing.Process(
         target=_run_whisper_task,
         args=(
             audio_path,
-            script_path,
             local_model_path,
             language,
             device,
             compute_type,
             result_queue,
-            preprocess,
+            script_queue,
             settings,
             log_queue,
             progress_queue,
-            short_sentences,
             verbose
         )
     )
     p.start()
     logger.info("已启动子进程进行语音识别...")
 
+    # 阶段1：接收转录结果
     try:
         result = result_queue.get(timeout=PROCESS_TIMEOUT)
         if isinstance(result, tuple) and result[0] == 'error':
             logger.error(f"子进程返回错误信息: {result[1]}")
             raise RuntimeError(f"语音识别失败: {result[1]}")
-        elif isinstance(result, tuple) and result[0] == 'result':
-            subtitles = result[1]
+        elif isinstance(result, tuple) and result[0] == 'transcript':
+            all_words, total_duration = result[1]
         else:
-            subtitles = result
+            raise RuntimeError(f"无法识别的子进程结果格式: {type(result)}")
     except Exception as e:
         if p.is_alive():
             logger.error("子进程可能卡死，正在终止...")
             kill_process_tree(p.pid)
             p.join()
-        raise RuntimeError(f"获取结果失败: {e}")
+        raise RuntimeError(f"获取转录结果失败: {e}")
 
-    subtitles = [r for r in subtitles if r and r[0]]
+    logger.info(f"转录完成，获取到 {len(all_words)} 个单词，总时长 {total_duration:.2f} 秒。")
+
+    # 阶段2：准备台本并发送给子进程进行对齐
+    _, script_sents = _prepare_script(script_path, preprocess, short_sentences)
+    logger.info(f"台本准备完成，获取到 {len(script_sents)} 个句子。发送至子进程进行对齐...")
+
+    script_queue.put(script_sents)
+
+    # 阶段3：接收对齐后的字幕结果
+    try:
+        result = result_queue.get(timeout=PROCESS_TIMEOUT)
+        if isinstance(result, tuple) and result[0] == 'error':
+            logger.error(f"子进程返回错误信息: {result[1]}")
+            raise RuntimeError(f"对齐处理失败: {result[1]}")
+        elif isinstance(result, tuple) and result[0] == 'result':
+            subtitles = result[1]
+        else:
+            raise RuntimeError(f"无法识别的子进程结果格式: {type(result)}")
+    except Exception as e:
+        if p.is_alive():
+            logger.error("子进程可能卡死，正在终止...")
+            kill_process_tree(p.pid)
+            p.join()
+        raise RuntimeError(f"获取对齐结果失败: {e}")
 
     p.join(timeout=10)
     if p.is_alive():
         logger.warning("子进程未及时退出，强制终止。")
         kill_process_tree(p.pid)
         p.join()
+
+    subtitles = [r for r in subtitles if r and r[0]]
 
     if subtitles:
         logger.info('主进程已获取到字幕。正在保存字幕文件...')
@@ -581,10 +608,10 @@ def direct_it(
 if __name__ == "__main__":
     setup_logging(console=True, file=True)
     direct_it(
-        audio_path="audio.wav",                # 音频文件路径
-        script_path="script.txt",               # 台本文件路径
-        output_path="output.lrc",                # 输出文件路径（.srt 或 .lrc）
-        local_model_path="./faster-whisper-large-v3-turbo",  # 本地模型文件夹路径
+        audio_path=os.path.abspath("audio.wav"),
+        script_path=os.path.abspath("script.txt"),
+        output_path=os.path.abspath("output.lrc"),
+        local_model_path=os.path.abspath("./faster-whisper-large-v3-turbo"),
         language='ja',                           # 语言代码
         device='cuda',                           # 计算设备 'cuda' 或 'cpu'
         compute_type='float16',                   # 计算类型

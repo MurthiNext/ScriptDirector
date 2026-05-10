@@ -69,7 +69,7 @@ def processing_thread(app: 'App') -> None:
                 try:
                     if subtitle_path:
                         # 只对齐模式
-                        audio_dir = os.path.dirname(subtitle_path) or '.'
+                        audio_dir = os.path.dirname(subtitle_path)
                         base = name if name else os.path.splitext(os.path.basename(subtitle_path))[0]
                         output_path = os.path.join(audio_dir, f"{base}.{output_format}")
                         align_it(
@@ -79,12 +79,12 @@ def processing_thread(app: 'App') -> None:
                             output_format=output_format,
                             preprocess=preprocess,
                             short_sentences=short_sentences,
-                            config_path='config.ini'
+                            config_path=app.config_path
                         )
                         result_queue.put(('success', output_path))
                     else:
                         # 听写模式（原有逻辑）
-                        audio_dir = os.path.dirname(audio) or '.'
+                        audio_dir = os.path.dirname(audio)
                         base = name if name else os.path.splitext(os.path.basename(audio))[0]
                         output_path = os.path.join(audio_dir, f"{base}.{output_format}")
 
@@ -141,11 +141,14 @@ class App(ctk.CTk):
         self.geometry("1400x700")
         self.resizable(False, False)
 
+        self.config_path = os.path.abspath('config.ini')
+        self.log_path = os.path.abspath('log.log')
+
         # 配置日志：输出到文件（log.log）和队列（供 GUI 显示），不输出到终端
-        setup_logging(console=False, file=False, log_queue=log_queue, clear_existing=True)
+        setup_logging(console=False, file=False, log_queue=log_queue, log_file=self.log_path, clear_existing=True)
 
         # 启动时清空日志
-        with open('log.log', 'w', encoding='utf-8') as f:
+        with open(self.log_path, 'w', encoding='utf-8') as f:
             pass
 
         ctk.set_appearance_mode("dark")
@@ -339,7 +342,7 @@ class App(ctk.CTk):
         # 绑定关闭事件
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        self.settings = load_config('config.ini')
+        self.settings = load_config(self.config_path)
         if self.settings:
             if self.settings.get('model'):
                 self.model_entry.insert(0, self.settings['model'])
@@ -368,6 +371,7 @@ class App(ctk.CTk):
         initial_dir = os.path.dirname(self.audio_entry.get()) if self.audio_entry.get() else ''
         path = open_file_dialog('audio', initial_dir)
         if path:
+            path = os.path.abspath(path)
             self.audio_entry.delete(0, "end")
             self.audio_entry.insert(0, path)
 
@@ -375,6 +379,7 @@ class App(ctk.CTk):
         initial_dir = os.path.dirname(self.script_entry.get()) if self.script_entry.get() else ''
         path = open_file_dialog('script', initial_dir)
         if path:
+            path = os.path.abspath(path)
             self.script_entry.delete(0, "end")
             self.script_entry.insert(0, path)
 
@@ -382,6 +387,7 @@ class App(ctk.CTk):
         initial_dir = os.path.dirname(self.subtitle_entry.get()) if self.subtitle_entry.get() else ''
         path = open_file_dialog('subtitle', initial_dir)
         if path:
+            path = os.path.abspath(path)
             self.subtitle_entry.delete(0, "end")
             self.subtitle_entry.insert(0, path)
             self.on_subtitle_change()
@@ -390,21 +396,25 @@ class App(ctk.CTk):
         initial_dir = self.model_entry.get() if self.model_entry.get() else ''
         path = open_file_dialog('model', initial_dir)
         if path:
+            path = os.path.abspath(path)
+            if not os.path.exists(os.path.join(path, 'model.bin')):
+                messagebox.showerror("错误", "模型路径无效，该路径下未找到 model.bin 文件。")
+                return
             self.model_entry.delete(0, "end")
             self.model_entry.insert(0, path)
 
     def start_processing(self) -> None:
         # 运行时清空日志
-        with open('log.log', 'w', encoding='utf-8') as f:
+        with open(self.log_path, 'w', encoding='utf-8') as f:
             pass
         self.log_text.delete("1.0", "end")
-        audio = self.audio_entry.get()
-        script = self.script_entry.get()
-        subtitle = self.subtitle_entry.get()
+        audio = os.path.abspath(self.audio_entry.get()) if self.audio_entry.get().strip() else ''
+        script = os.path.abspath(self.script_entry.get()) if self.script_entry.get().strip() else ''
+        subtitle = os.path.abspath(self.subtitle_entry.get()) if self.subtitle_entry.get().strip() else ''
         name = self.name_entry.get()
         output_format = self.type_menu.get()
         preprocess = self.preprocess_var.get()
-        model_path = self.model_entry.get()
+        model_path = os.path.abspath(self.model_entry.get()) if self.model_entry.get().strip() else ''
         language = self.lang_combo.get()
         device = self.device_combo.get()
         compute_type = self.compute_combo.get()
@@ -421,6 +431,9 @@ class App(ctk.CTk):
             return
         if not subtitle and not language:
             self.append_log("错误：请选择语言代码")
+            return
+        if not subtitle and model_path and not os.path.exists(os.path.join(model_path, 'model.bin')):
+            self.append_log("错误：模型路径无效，该路径下未找到 model.bin 文件。")
             return
 
         # 如果只对齐模式且启用了短句模式，在日志中警告
@@ -478,7 +491,7 @@ f"""
                     msg = format_log_record(item)
                     self.append_log(msg)
                     try:
-                        with open('log.log', 'a', encoding='utf-8') as f:
+                        with open(self.log_path, 'a', encoding='utf-8') as f:
                             f.write(msg + '\n')
                     except Exception:
                         pass

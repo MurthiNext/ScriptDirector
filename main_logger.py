@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+import os
 from logging.handlers import QueueHandler
 
 # 单例 logger
@@ -26,6 +27,7 @@ def setup_logging(
     """
     主进程日志配置：可同时输出到控制台、文件和队列。
     """
+    log_file = os.path.abspath(log_file)
     if clear_existing:
         for handler in logger.handlers[:]:
             handler.close()
