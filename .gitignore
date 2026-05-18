@@ -6,9 +6,9 @@ misc
 *.old
 faster-whisper-large-v3
 faster-whisper-large-v3-turbo
-audio.wav
+audio*.wav
 log.log
-script.txt
+script*.txt
 director_xxl.py
 processor.py
 *.spec

@@ -172,19 +172,33 @@ def kill_process_tree(pid: Optional[int]) -> None:
     except psutil.NoSuchProcess:
         pass
 
+# 匹配各类括号内容（用于整行判断和行首去除）
+_BRACKET_PATTERN = (
+    r'\[[^\]]*\]'           # 半角方括号 [...]
+    r'|【[^】]*】'          # 全角方括号 【...】
+    r'|（[^）]*）'          # 全角圆括号 （...）
+    r'|\([^)]*\)'           # 半角圆括号 (...)
+    r'|<[^>]*>'             # 尖括号 <...>
+    r'|\{[^}]*\}'           # 花括号 {...}
+)
+
 def is_bracket_line(line: str) -> bool:
     """
-    判断整行是否仅由方括号内容（可能带空格）组成。
+    判断整行是否仅由括号内容（可能带空格）组成。
+    支持：方括号、圆括号、尖括号、花括号。
     """
     stripped = line.strip()
-    return bool(re.match(r'^(\[[^\]]*\]|【[^】]*】)$', stripped))
+    if not stripped:
+        return False
+    return bool(re.match(rf'^(\s*(?:{_BRACKET_PATTERN})\s*)+$', stripped))
 
 def remove_line_brackets(line: str) -> str:
     """
-    匹配行首的连续方括号标识（可包含前导空格）
+    匹配行首的连续括号标识（可包含前导空格）
     例如："  [角色] 文本" -> "文本"
+         "（落ち着いて）つまり" -> "つまり"
     """
-    pattern = r'^(\s*(\[[^\]]*\]|【[^】]*】)\s*)+'
+    pattern = rf'^(\s*(?:{_BRACKET_PATTERN})\s*)+'
     return re.sub(pattern, '', line)
 
 def clean_script_text(text: str) -> str:
@@ -192,9 +206,9 @@ def clean_script_text(text: str) -> str:
     对台本全文进行清洗：
     1. 按行分割
     2. 删除空行
-    3. 删除整行都是方括号的行（角色标识行）
-    4. 删除行首的方括号标识（保留文本）
-    5. 保留句子中的方括号
+    3. 删除整行仅含括号内容（方/圆/尖/花括号）的行
+    4. 删除行首的括号标识（保留文本）
+    5. 保留句子中间的括号内容
     """
     lines = text.splitlines()
     cleaned_lines = []
@@ -202,10 +216,10 @@ def clean_script_text(text: str) -> str:
         # 删除空行
         if not line.strip():
             continue
-        # 如果是整行都是方括号，跳过该行
+        # 如果是整行仅含括号内容，跳过该行
         if is_bracket_line(line):
             continue
-        # 删除行首的方括号标识
+        # 删除行首的括号标识
         line = remove_line_brackets(line)
         # 如果删除后为空行，跳过
         if not line.strip():

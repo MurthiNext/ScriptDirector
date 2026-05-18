@@ -574,7 +574,7 @@ def direct_it(
             p_transcribe.join()
         raise RuntimeError(f"获取转录结果失败: {e}")
 
-    p_transcribe.join(timeout=10)
+    p_transcribe.join(timeout=PROCESS_TIMEOUT)
     if p_transcribe.is_alive():
         logger.warning("转录子进程未及时退出，强制终止。")
         kill_process_tree(p_transcribe.pid)
@@ -618,7 +618,7 @@ def direct_it(
             p_align.join()
         raise RuntimeError(f"获取对齐结果失败: {e}")
 
-    p_align.join(timeout=10)
+    p_align.join(timeout=PROCESS_TIMEOUT)
     if p_align.is_alive():
         logger.warning("对齐子进程未及时退出，强制终止。")
         kill_process_tree(p_align.pid)
