@@ -3,9 +3,76 @@ import json
 import psutil
 import re
 import os
+import subprocess
+import tempfile
+import shutil
 from typing import List, Tuple, Dict, Optional, Union, Sequence
 
 from main_logger import logger
+
+# 视频文件扩展名集合（支持的主流格式）
+VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.avi', '.mov', '.webm', '.ts', '.mts', '.m2ts', '.flv', '.wmv', '.3gp', '.mpeg'}
+
+def is_video_file(path: str) -> bool:
+    """判断文件是否为视频文件（基于扩展名）。"""
+    ext = os.path.splitext(path)[1].lower()
+    return ext in VIDEO_EXTENSIONS
+
+def _find_ffmpeg() -> Optional[str]:
+    """
+    查找 ffmpeg 可执行文件，按优先级：
+    1. 项目目录 ffmpeg/ 下的本地拷贝
+    2. 系统 PATH 中的 ffmpeg
+    返回 None 表示未找到。
+    """
+    # 1. 检查项目本地 ffmpeg/ 目录
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    local_exe = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+    local_path = os.path.join(base_dir, 'ffmpeg', local_exe)
+    if os.path.isfile(local_path):
+        return local_path
+
+    # 2. 检查系统 PATH
+    system_path = shutil.which('ffmpeg')
+    if system_path:
+        return system_path
+
+    return None
+
+
+def extract_audio_from_video(video_path: str, output_path: str, sample_rate: int = 16000) -> str:
+    """
+    使用 ffmpeg 从视频文件中提取音频轨，转为 WAV 格式。
+    默认输出 16kHz 单声道 16-bit PCM（Whisper 的最佳输入格式）。
+    按优先级查找 ffmpeg：项目本地 ffmpeg/ 目录 → 系统 PATH。
+    返回输出路径。
+    """
+    ffmpeg_path = _find_ffmpeg()
+    if ffmpeg_path is None:
+        raise RuntimeError(
+            "未找到 ffmpeg。请将 ffmpeg.exe 放入项目根目录的 ffmpeg/ 文件夹，"
+            "或将其添加到系统 PATH 环境变量中。"
+        )
+
+    cmd = [
+        ffmpeg_path, '-y',
+        '-i', video_path,
+        '-vn',                       # 不处理视频
+        '-acodec', 'pcm_s16le',      # 16-bit PCM
+        '-ar', str(sample_rate),     # 采样率
+        '-ac', '1',                  # 单声道
+        output_path
+    ]
+    logger.info(f"正在从视频提取音频: {os.path.basename(video_path)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        error_msg = result.stderr.strip()
+        raise RuntimeError(f"ffmpeg 音频提取失败: {error_msg}")
+    if not os.path.exists(output_path):
+        raise RuntimeError(f"ffmpeg 未生成输出文件: {output_path}")
+    file_size = os.path.getsize(output_path)
+    logger.info(f"音频提取完成: {output_path} ({file_size / 1024:.1f} KB)")
+    return output_path
 
 def load_config(config_path: str='config.ini') -> Dict:
     """

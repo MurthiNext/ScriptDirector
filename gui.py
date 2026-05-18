@@ -27,9 +27,13 @@ def open_file_dialog(file_type: str, initialdir: str = '') -> str:
     root.withdraw()
     if file_type == 'audio':
         path = filedialog.askopenfilename(
-            title="选择音频文件",
+            title="选择音频或视频文件",
             initialdir=initialdir,
-            filetypes=[("音频文件", "*.wav *.mp3 *.flac *.m4a")]
+            filetypes=[
+                ("媒体文件", "*.wav *.mp3 *.flac *.m4a *.ogg *.aac *.mp4 *.mkv *.avi *.mov *.webm"),
+                ("音频文件", "*.wav *.mp3 *.flac *.m4a *.ogg *.aac"),
+                ("视频文件", "*.mp4 *.mkv *.avi *.mov *.webm *.ts *.flv")
+            ]
         )
     elif file_type == 'script':
         path = filedialog.askopenfilename(
@@ -224,8 +228,8 @@ class App(ctk.CTk):
         separator1.grid(row=row, column=0, columnspan=3, padx=5, pady=10, sticky="ew")
         row += 1
 
-        # 音频文件
-        self.audio_label = ctk.CTkLabel(self.left_frame, text="音频文件：", anchor="e", width=100, font=self.default_font)
+        # 音频/视频文件
+        self.audio_label = ctk.CTkLabel(self.left_frame, text="音频/视频：", anchor="e", width=100, font=self.default_font)
         self.audio_label.grid(row=row, column=0, padx=5, pady=5, sticky="e")
         self.audio_entry = ctk.CTkEntry(self.left_frame, font=self.default_font)
         self.audio_entry.grid(row=row, column=1, padx=5, pady=5, sticky="ew")

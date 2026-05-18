@@ -4,6 +4,7 @@ import traceback
 import pysbd
 import re
 import os
+import tempfile
 import numpy as np
 from typing import List, Tuple, Optional, Dict
 from rapidfuzz import fuzz
@@ -16,7 +17,9 @@ from just_utils import (
     load_config,
     kill_process_tree,
     save_lrc,
-    save_srt
+    save_srt,
+    is_video_file,
+    extract_audio_from_video
 )
 from main_logger import logger, setup_logging, setup_subprocess_logging
 
@@ -532,6 +535,21 @@ def direct_it(
     if log_queue is None:
         setup_logging(console=True, file=True, clear_existing=True)
 
+    # 视频检测与音频提取
+    temp_audio_path = None
+    if is_video_file(audio_path):
+        logger.info(f"检测到视频文件: {os.path.basename(audio_path)}，准备提取音频轨...")
+        fd, temp_audio_path = tempfile.mkstemp(suffix='.wav')
+        os.close(fd)
+        try:
+            extract_audio_from_video(audio_path, temp_audio_path)
+        except Exception as e:
+            if os.path.exists(temp_audio_path):
+                os.remove(temp_audio_path)
+            raise RuntimeError(f"视频音频提取失败: {e}")
+        logger.info(f"音频已提取到临时文件，将使用临时音频进行后续处理")
+        audio_path = temp_audio_path
+
     settings = load_config(config_path)
     gap_penalty = settings.get('gap_penalty', -10)
     similarity_offset = settings.get('similarity_offset', 50)
@@ -639,6 +657,14 @@ def direct_it(
     if progress_queue is not None:
         progress_queue.put(PROGRESS_DONE)
     logger.info("字幕文件保存完成。")
+
+    # 清理视频提取产生的临时音频文件
+    if temp_audio_path and os.path.exists(temp_audio_path):
+        try:
+            os.remove(temp_audio_path)
+            logger.debug(f"临时音频文件已清理: {temp_audio_path}")
+        except OSError as e:
+            logger.warning(f"临时音频文件清理失败: {e}")
 
 if __name__ == "__main__":
     setup_logging(console=True, file=True)

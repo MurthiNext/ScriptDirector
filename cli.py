@@ -14,6 +14,7 @@ from director import (
     PROGRESS_ALIGN_END
 )
 from only_align import align_it, load_config
+from just_utils import is_video_file
 from main_logger import setup_logging
 
 AUDIO_EXTENSIONS = {'.wav', '.mp3', '.flac', '.m4a', '.ogg', '.aac'}
@@ -201,7 +202,7 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
     程序会自动识别文件类型：
     - 扩展名为 .txt 的视为台本文件
     - 扩展名为 .srt 或 .lrc 的视为已有字幕文件（启用只对齐模式）
-    - 其他扩展名或 MIME 类型为 audio/ 的视为音频文件
+    - 其他音频扩展名或常见视频扩展名视为音频/视频文件（视频将自动提取音频轨）
 
     \b
     生成的字幕文件与音频文件同名，扩展名为 .srt 或 .lrc，保存在同一目录。
@@ -239,7 +240,7 @@ def process_command(input_str: str, type: str, name: str, preprocess: bool, shor
         elif ext in ('.srt', '.lrc'):
             subtitle_path = f
         else:
-            if is_audio_file(f):
+            if is_audio_file(f) or is_video_file(f):
                 audio_path = f
             else:
                 raise click.UsageError(f'无法识别文件类型: {f}')
